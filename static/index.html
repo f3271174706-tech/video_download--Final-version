@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频下载器</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<style>
+/* Ensure interactive elements are clickable */
+#inputLayer, #dropletLayer, #resultLayer { position: relative; z-index: 3; }
+#dropletLayer { pointer-events: none; }
+#inputLayer *, #resultLayer * { pointer-events: auto; }
+
+/* ─── Slider glowing stream ─── */
+@keyframes sliderStream {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.slider-fill-stream {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    rgba(180,220,255,0.8),
+    rgba(210,190,255,0.85),
+    rgba(255,200,230,0.8),
+    rgba(180,220,255,0.8)
+  );
+  background-size: 200% 100%;
+  animation: sliderStream 1.2s linear infinite;
+  box-shadow:
+    0 0 8px rgba(200,210,255,0.4),
+    0 0 18px rgba(210,190,255,0.2);
+  position: relative;
+}
+.slider-fill-stream::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(210,200,255,0.4), transparent 70%);
+  filter: blur(3px);
+  pointer-events: none;
+}
+
+/* Flowing glow around active dot - synced with stream, light colors */
+@keyframes dotFlowGlow {
+  0% {
+    box-shadow:
+      -3px 0 10px rgba(180,220,255,0.4),
+      0 0 18px rgba(200,180,255,0.2);
+    border-color: rgba(180,220,255,0.6);
+  }
+  33% {
+    box-shadow:
+      0 0 10px rgba(210,190,255,0.4),
+      0 0 22px rgba(210,190,255,0.25);
+    border-color: rgba(210,190,255,0.6);
+  }
+  66% {
+    box-shadow:
+      3px 0 10px rgba(255,200,230,0.4),
+      0 0 18px rgba(255,200,230,0.2);
+    border-color: rgba(255,200,230,0.6);
+  }
+  100% {
+    box-shadow:
+      -3px 0 10px rgba(180,220,255,0.4),
+      0 0 18px rgba(200,180,255,0.2);
+    border-color: rgba(180,220,255,0.6);
+  }
+}
+.slider-dot-active-glow {
+  animation: dotFlowGlow 1.2s linear infinite;
+}
+</style>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600&display=swap');
+
+:root {
+  --glass-bg: rgba(255,255,255,0.55);
+  --glass-border: rgba(0,0,0,0.06);
+  --glass-highlight: rgba(255,255,255,0.8);
+  --glass-shadow: 0 8px 32px rgba(0,0,0,0.08);
+  --text-primary: rgba(0,0,0,0.85);
+  --text-secondary: rgba(0,0,0,0.5);
+  --text-tertiary: rgba(0,0,0,0.28);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f5f5f7;
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ─── Ambient background ─── */
+.bg-ambient {
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 25% 20%, rgba(120,180,255,0.2), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 80% 30%, rgba(200,160,255,0.18), transparent 55%),
+    radial-gradient(ellipse 60% 45% at 35% 75%, rgba(255,180,200,0.15), transparent 60%),
+    radial-gradient(ellipse 40% 30% at 70% 80%, rgba(160,220,255,0.12), transparent 50%),
+    #f5f5f7;
+}
+.bg-ambient::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 50% 40% at 50% 40%, rgba(255,255,255,0.5), transparent);
+}
+
+/* ─── Liquid Glass base ─── */
+.glass {
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(80px) saturate(180%);
+  -webkit-backdrop-filter: blur(80px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.7);
+  box-shadow:
+    0 0 0 0.5px rgba(255,255,255,0.5) inset,
+    0 8px 32px rgba(0,0,0,0.06);
+}
+
+.glass-surface {
+  background: rgba(255,255,255,0.55);
+  backdrop-filter: blur(100px) saturate(200%);
+  -webkit-backdrop-filter: blur(100px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.65);
+  position: relative;
+  box-shadow:
+    0 0 0 0.5px rgba(255,255,255,0.6) inset,
+    0 1px 0 rgba(255,255,255,0.5) inset,
+    0 24px 64px rgba(0,0,0,0.08),
+    0 2px 8px rgba(0,0,0,0.04);
+}
+.glass-surface::before {
+  content: ''; position: absolute; inset: -2px; border-radius: inherit;
+  background: linear-gradient(180deg, rgba(200,220,255,0.2), transparent 70%);
+  z-index: -1; pointer-events: none;
+  filter: blur(15px);
+}
+.glass-surface::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--glow-angle, 0deg),
+    transparent 0%, transparent 12%,
+    rgba(100,180,255,0.85) 22%, rgba(180,120,255,0.85) 38%, rgba(255,140,200,0.75) 55%, rgba(100,200,255,0.85) 72%,
+    transparent 88%, transparent 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  animation: glow-rotate 4s linear infinite;
+}
+
+.glass-card {
+  background: rgba(255,255,255,0.5);
+  backdrop-filter: blur(60px) saturate(180%);
+  -webkit-backdrop-filter: blur(60px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.7);
+  position: relative;
+  box-shadow:
+    0 0 0 0.5px rgba(255,255,255,0.6) inset,
+    0 1px 0 rgba(255,255,255,0.4) inset,
+    0 16px 48px rgba(0,0,0,0.08),
+    0 4px 12px rgba(0,0,0,0.04);
+}
+.glass-card::before {
+  content: ''; position: absolute; inset: -2px; border-radius: inherit;
+  background: linear-gradient(135deg, rgba(180,200,255,0.15), transparent 40%, transparent 60%, rgba(200,220,255,0.1));
+  z-index: -1; pointer-events: none;
+  filter: blur(20px);
+}
+.glass-card::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--glow-angle, 0deg),
+    transparent 0%, transparent 12%,
+    rgba(80,160,255,0.9) 22%, rgba(160,100,255,0.85) 38%, rgba(255,120,180,0.8) 55%, rgba(80,200,255,0.9) 72%,
+    transparent 88%, transparent 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  animation: glow-rotate 4s linear infinite;
+}
+
+/* ─── Mobile Optimization ─── */
+@media (max-width: 640px) {
+  #magicCard {
+    border-radius: 24px !important;
+    padding: 24px 16px !important;
+    width: 100% !important;
+  }
+  #inputLayer .flex.gap-2 {
+    flex-direction: column;
+    gap: 8px;
+  }
+  #inputLayer .flex.gap-2 input {
+    width: 100%;
+    font-size: 16px; /* Prevent iOS zoom */
+    padding: 14px 16px;
+    border-radius: 16px;
+  }
+  #inputLayer .flex.gap-2 button {
+    width: 100%;
+    padding: 14px;
+    border-radius: 16px;
+    font-size: 15px;
+    min-height: 48px; /* Touch target */
+  }
+  #inputLayer .flex.gap-2 button:last-child {
+    order: -1; /* Parse button first on mobile */
+  }
+  .quality-btn, .type-btn {
+    padding: 14px 12px !important;
+    font-size: 14px !important;
+    min-height: 44px;
+  }
+  #downloadBtn {
+    padding: 16px !important;
+    font-size: 15px !important;
+    min-height: 52px;
+  }
+  #mediaPreview {
+    max-width: 100% !important;
+    margin: 0 -16px;
+    padding: 0 16px;
+  }
+  #photoDisplay {
+    max-height: 60vh;
+  }
+  #landscapeBtn {
+    display: none; /* Hide landscape on mobile */
+  }
+  #photoDots {
+    gap: 6px;
+  }
+  #photoDots button {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #saveImageBtn {
+    padding: 14px;
+    font-size: 14px;
+    min-height: 48px;
+  }
+  #progressWrap {
+    margin-top: 8px;
+  }
+  /* Photo slider mobile */
+  input[type="range"] {
+    height: 44px;
+  }
+  .slider-dot {
+    width: 44px !important;
+    height: 44px !important;
+    margin-left: -22px !important;
+  }
+}
+
+/* ─── Input ─── */
+.glass-input {
+  background: rgba(255,255,255,0.6);
+  border: 1px solid rgba(0,0,0,0.06);
+  color: var(--text-primary);
+  font-family: inherit;
+  outline: none;
+}
+.glass-input::placeholder { color: var(--text-tertiary); }
+.glass-input:focus {
+  border-color: rgba(0,100,255,0.25);
+  background: rgba(255,255,255,0.8);
+  box-shadow: 0 0 0 4px rgba(0,100,255,0.06), 0 2px 12px rgba(0,0,0,0.04);
+}
+
+/* ─── Buttons ─── */
+.btn-glass {
+  font-family: inherit; font-weight: 500; font-size: 14px;
+  background: rgba(255,255,255,0.5);
+  border: 1px solid rgba(0,0,0,0.06);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.btn-glass:hover {
+  background: rgba(255,255,255,0.75);
+  border-color: rgba(0,0,0,0.1);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.btn-glass:active { background: rgba(255,255,255,0.6); transform: scale(0.985); }
+
+.btn-glass-active {
+  background: rgba(255,255,255,0.52) !important;
+  border: 1px solid transparent !important;
+  color: rgba(0,70,200,0.9) !important;
+  box-shadow:
+    0 1px 3px rgba(0,0,0,0.06),
+    0 0 0 1px rgba(255,255,255,0.5) inset,
+    0 -1px 0 rgba(0,0,0,0.04) inset,
+    0 4px 12px rgba(0,100,255,0.08) !important;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.btn-glass-active::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--glow-angle, 0deg),
+    transparent 0%, transparent 5%,
+    rgba(80,160,255,1) 15%, rgba(160,100,255,1) 32%, rgba(255,120,180,0.96) 50%, rgba(80,200,255,1) 68%,
+    transparent 95%, transparent 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: -1;
+}
+.btn-glass-active::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -30%; width: 160%; height: 55%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.15) 60%, transparent 100%);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.btn-primary {
+  font-family: inherit; font-weight: 500; font-size: 14px;
+  background: rgba(255,255,255,0.45);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid transparent;
+  color: rgba(0,0,0,0.75);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  position: relative;
+  isolation: isolate;
+}
+.btn-primary::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--glow-angle, 0deg),
+    transparent 0%, transparent 5%,
+    rgba(80,160,255,1) 15%, rgba(160,100,255,1) 32%, rgba(255,120,180,0.96) 50%, rgba(80,200,255,1) 68%,
+    transparent 95%, transparent 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: -1;
+  animation: glow-rotate-reverse 4s linear infinite;
+}
+.btn-primary:hover { background: rgba(255,255,255,0.65); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.btn-primary:active { background: rgba(255,255,255,0.4); transform: scale(0.985); }
+.btn-primary:disabled { background: rgba(255,255,255,0.2); color: rgba(0,0,0,0.15); cursor: not-allowed; box-shadow: none; }
+.btn-primary:disabled::before { opacity: 0.3; }
+
+.btn-accent {
+  font-family: inherit; font-weight: 500; font-size: 14px;
+  background: rgba(255,255,255,0.45);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid transparent;
+  color: rgba(0,0,0,0.75);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  position: relative;
+  isolation: isolate;
+}
+.btn-accent::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--glow-angle, 0deg),
+    transparent 0%, transparent 5%,
+    rgba(80,160,255,1) 15%, rgba(160,100,255,1) 32%, rgba(255,120,180,0.96) 50%, rgba(80,200,255,1) 68%,
+    transparent 95%, transparent 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: -1;
+  animation: glow-rotate-reverse 4s linear infinite;
+}
+.btn-accent:hover { background: rgba(255,255,255,0.65); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.btn-accent:active { background: rgba(255,255,255,0.4); transform: scale(0.985); }
+.btn-accent:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-accent:disabled::before { opacity: 0.3; }
+
+/* ─── Spinner ─── */
+.spinner {
+  width: 16px; height: 16px;
+  border: 2px solid rgba(0,0,0,0.08);
+  border-top: 2px solid rgba(0,0,0,0.4);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Flowing glow border ─── */
+@property --glow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes glow-rotate {
+  to { --glow-angle: 360deg; }
+}
+@keyframes glow-rotate-reverse {
+  to { --glow-angle: -360deg; }
+}
+
+/* ─── Glow burst ring (GSAP animated) ─── */
+.glow-burst-ring {
+  position: absolute; inset: -4px; border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(from 0deg,
+    rgba(80,160,255,0.9), rgba(160,100,255,0.85), rgba(255,120,180,0.8), rgba(80,200,255,0.9), rgba(80,160,255,0.9));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 0;
+  will-change: transform, opacity, filter;
+}
+
+/* ─── Video player ─── */
+.video-frame {
+  background: #000;
+  overflow: hidden;
+}
+#videoWrap {
+  background: transparent;
+}
+
+/* ─── Media frame with edge refraction ─── */
+.media-frame {
+  position: relative;
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.5) inset,
+    0 24px 64px rgba(0,0,0,0.1);
+}
+.media-frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 5px;
+  background:
+    conic-gradient(from var(--glow-angle, 0deg),
+      transparent 0%, transparent 12%,
+      rgba(255,255,255,1) 22%, rgba(255,240,250,0.9) 38%, rgba(240,245,255,1) 55%, rgba(255,255,255,1) 72%,
+      transparent 88%, transparent 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 2;
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  animation: glow-rotate 8s linear infinite;
+}
+#navBar { transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
+#navBar.expanded { padding: 32px; min-height: 220px; }
+#navBar.expanded #navTag { display: none !important; }
+video::-webkit-media-controls-panel {
+  background: linear-gradient(transparent, rgba(0,0,0,0.4)) !important;
+}
+video::-webkit-media-controls-enclosure {
+  background: transparent !important;
+}
+
+/* ─── Toast ─── */
+.toast-widget {
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(60px);
+  -webkit-backdrop-filter: blur(60px);
+  border: 1px solid rgba(255,255,255,0.6);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="bgLayer" class="bg-ambient"></div>
+
+<div class="relative z-10 min-h-screen flex flex-col">
+
+  <!-- ─── Navigation bar ─── -->
+  <nav id="navBar" class="glass-surface shrink-0 mx-4 mt-3 rounded-[28px] px-5 py-3 flex items-center justify-between transition-all duration-500" style="will-change:transform">
+    <div id="navNormal" class="flex items-center gap-2.5">
+      <img src="/static/logo.jpg" alt="" class="h-10 w-auto rounded cursor-pointer" onclick="document.getElementById('navBar').classList.toggle('expanded');document.getElementById('navNormal').classList.toggle('hidden');document.getElementById('navExpanded').classList.toggle('hidden');">
+      <span class="text-sm font-medium text-black/50 tracking-wide">fzpnowm.top</span>
+    </div>
+    <div id="navExpanded" class="hidden w-full flex items-center justify-center gap-6 py-2">
+      <img src="/static/logo.jpg" alt="" class="h-28 w-auto rounded-xl cursor-pointer" onclick="document.getElementById('navBar').classList.toggle('expanded');document.getElementById('navNormal').classList.toggle('hidden');document.getElementById('navExpanded').classList.toggle('hidden');">
+      <p style="font-family:'STXingkai','华文行楷','KaiTi','楷体',serif;font-size:24px;letter-spacing:5px;" class="text-black/60">以少年之身，逆既定之命</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="navTag" class="text-[10px] sm:text-[11px] text-black/25 hidden sm:inline tracking-wide">Douyin · X · B站 · 快手 · TikTok</span>
+      <div class="relative" id="versionMenu">
+        <button onclick="document.getElementById('versionMenu').classList.toggle('open')" class="w-8 h-8 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center transition-colors border border-black/8">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+        </button>
+        <div class="hidden absolute right-0 top-10 w-40 py-1.5 rounded-2xl bg-white/70 backdrop-blur-xl border border-black/8 shadow-lg z-50" id="versionDropdown">
+          <a href="/" class="block px-4 py-2 text-xs text-black font-medium bg-black/5 transition-colors">🤍 Liquid Glass 3.0 ✓</a>
+          <a href="/v1" class="block px-4 py-2 text-xs text-black/60 hover:text-black hover:bg-black/5 transition-colors">🖤 经典暗色版</a>
+          <a href="/v2" class="block px-4 py-2 text-xs text-black/60 hover:text-black hover:bg-black/5 transition-colors">💎 WebGL 液态玻璃</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ─── Main content ─── -->
+  <div class="flex-1 flex flex-col items-center justify-center p-3 sm:p-6 gap-4 sm:gap-5">
+
+    <!-- ═══ Media Preview (outside card, no glass) ═══ -->
+    <div id="mediaPreview" class="hidden w-full px-0 sm:px-0" style="max-width:960px;">
+      <div class="media-frame">
+        <div id="videoWrap" class="aspect-video">
+          <video id="videoPlayer" controls playsinline class="w-full h-full object-contain" style="border-radius:12px;"></video>
+        </div>
+        <div id="photoWrap" class="hidden">
+          <img id="photoDisplay" src="" alt="" class="w-full object-contain max-h-[60vh] sm:max-h-80 mx-auto" style="border-radius:12px;">
+        </div>
+        <div id="loadingHint" class="hidden absolute inset-0 flex items-center justify-center bg-white/70 text-xs text-black/30" style="backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);">Loading...</div>
+        <button id="landscapeBtn" onclick="var outer=this.parentElement;var mp=document.getElementById('mediaPreview');var vw=document.getElementById('videoWrap');var vp=document.getElementById('videoPlayer');this.classList.toggle('active');if(this.classList.contains('active')){mp.style.maxWidth='480px';vw.style.aspectRatio='9/16';vp.removeAttribute('controls');setTimeout(function(){var w=vw.clientWidth;var h=vw.clientHeight;outer.style.transform='rotate(-90deg)';outer.style.transformOrigin='center center';outer.style.marginBottom=-(h-w)/2+'px'},50)}else{mp.style.maxWidth='960px';vw.style.aspectRatio='16/9';vp.setAttribute('controls','');outer.style.transform='';outer.style.marginBottom=''}" title="横屏模式" class="absolute bottom-3 right-3 z-10 w-9 h-9 rounded-full bg-black/10 hover:bg-black/20 flex items-center justify-center transition-colors border border-black/10" style="backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.6)" stroke-width="1.5"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10v4M17 10v4"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══ MAGIC CARD (controls only) ═══ -->
+    <div id="magicCard" class="glass-card relative z-10 flex flex-col items-center"
+         style="width:min(680px,100%); border-radius:36px; padding:36px 32px; will-change:transform,border-radius,width,height,padding;">
+      <div id="burstRing" class="glow-burst-ring" style="opacity:0;"></div>
+
+      <!-- ── State 1: Input ── -->
+      <div id="inputLayer" class="w-full flex flex-col items-center gap-5 sm:gap-6">
+        <div class="text-center">
+          <p class="text-[13px] sm:text-sm font-medium text-black/50 tracking-tight mb-1">Paste a link to download</p>
+          <p class="text-[11px] sm:text-xs text-black/25">No watermarks. Free.</p>
+        </div>
+
+        <div class="w-full flex flex-col sm:flex-row gap-2 sm:gap-2">
+          <input id="urlInput" type="text" placeholder="Share link..." autocomplete="off"
+            class="glass-input flex-1 text-[16px] sm:text-sm rounded-[16px] sm:rounded-[20px] px-4 sm:px-5 py-3.5 sm:py-3.5">
+          <div class="flex gap-2">
+            <button onclick="pasteAndParse()"
+              class="btn-glass shrink-0 rounded-[16px] sm:rounded-[20px] px-4 flex items-center gap-1.5">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/>
+              </svg>
+              <span class="text-xs">Paste</span>
+            </button>
+            <button id="parseBtn" onclick="parseVideo()"
+              class="btn-primary flex-1 sm:flex-none shrink-0 rounded-[16px] sm:rounded-[20px] px-5 py-3.5 flex items-center justify-center gap-1.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.2-5.2"/><circle cx="11" cy="11" r="8"/>
+              </svg>
+              <span class="sm:hidden text-xs">解析</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── State 2: Loading droplet ── -->
+      <div id="dropletLayer" class="hidden absolute inset-0 flex flex-col items-center justify-center gap-6" style="z-index:5;">
+        <div class="relative w-16 h-16 flex items-center justify-center">
+          <div id="ringOuter" class="absolute inset-0 rounded-full border border-black/[0.08]"></div>
+          <div id="ringInner" class="absolute inset-2 rounded-full border border-black/[0.1]"></div>
+          <div id="centerDot" class="w-3 h-3 rounded-full bg-black/25"></div>
+        </div>
+        <div id="loadingDots" class="flex gap-1.5">
+          <div class="w-1.5 h-1.5 rounded-full bg-black/25"></div>
+          <div class="w-1.5 h-1.5 rounded-full bg-black/25"></div>
+          <div class="w-1.5 h-1.5 rounded-full bg-black/25"></div>
+        </div>
+      </div>
+
+      <!-- ── State 3: Result ── -->
+      <div id="resultLayer" class="hidden w-full flex flex-col gap-5">
+        <!-- Title -->
+        <div>
+          <span id="platformTag" class="inline-block text-[11px] font-medium text-black/30 tracking-wide uppercase mb-1.5"></span>
+          <h3 id="videoTitle" class="text-sm font-medium text-black/75 leading-relaxed line-clamp-2"></h3>
+        </div>
+
+        <!-- Photo dots -->
+        <div id="photoDots" class="hidden flex items-center justify-center gap-2"></div>
+
+        <!-- Save current image button -->
+        <button id="saveImageBtn" onclick="saveCurrentImage()" class="hidden btn-glass w-full rounded-[16px] py-2.5 text-xs flex items-center justify-center gap-1.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Save Image
+        </button>
+
+        <!-- Quality -->
+        <div id="qualityRow" class="flex gap-1.5 sm:gap-1.5">
+          <button onclick="setQuality('720p')" data-q="720p" class="quality-btn btn-glass rounded-[14px] sm:rounded-[16px] py-3 sm:py-2.5 px-3 flex-1 text-xs sm:text-xs text-center">720p</button>
+          <button onclick="setQuality('1080p')" data-q="1080p" class="quality-btn btn-glass rounded-[14px] sm:rounded-[16px] py-3 sm:py-2.5 px-3 flex-1 text-xs sm:text-xs text-center">1080p</button>
+          <button onclick="setQuality('hd')" data-q="hd" class="quality-btn btn-glass rounded-[14px] sm:rounded-[16px] py-3 sm:py-2.5 px-3 flex-1 text-xs sm:text-xs text-center">HD</button>
+        </div>
+
+        <!-- Type -->
+        <div id="typeRow" class="flex gap-2">
+          <button onclick="setType('video')" data-t="video" class="type-btn btn-glass rounded-[14px] sm:rounded-[16px] py-3 sm:py-2.5 flex-1 text-xs sm:text-xs text-center">Video</button>
+          <button onclick="setType('mp3')" data-t="mp3" class="type-btn btn-glass rounded-[14px] sm:rounded-[16px] py-3 sm:py-2.5 flex-1 text-xs sm:text-xs text-center">MP3</button>
+        </div>
+
+        <!-- Download -->
+        <button id="downloadBtn" onclick="downloadVideo()"
+          class="btn-accent w-full rounded-[16px] sm:rounded-[20px] py-4 sm:py-3.5 text-sm sm:text-sm flex items-center justify-center gap-2">
+          <span id="downloadText">Download</span>
+          <div id="downloadSpinner" class="hidden spinner"></div>
+        </button>
+        <!-- Progress Bar -->
+        <div id="progressWrap" class="hidden w-full">
+          <div class="w-full h-1.5 rounded-full bg-black/5 overflow-hidden">
+            <div id="progressBar" class="h-full rounded-full bg-gradient-to-r from-blue-500 to-purple-400 transition-all duration-300" style="width:0%"></div>
+          </div>
+          <p id="progressText" class="text-[11px] text-black/30 mt-1.5 text-center"></p>
+        </div>
+
+        <button onclick="location.reload()" class="w-full text-xs text-red-400/60 hover:text-red-500/80 py-1 transition-colors">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// Mouse Glow Trail
+// ═══════════════════════════════════════
+// ── Linear elastic trail dots ──
+const TRAIL_COUNT = 50;
+const trailDots = [];
+const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const trailContainer = document.createElement('div');
+trailContainer.style.cssText = 'position:fixed;inset:0;z-index:9998;pointer-events:none;';
+document.body.appendChild(trailContainer);
+
+for (let i = 0; i < TRAIL_COUNT; i++) {
+  const dot = document.createElement('div');
+  const size = Math.max(1.5, 6 - i * 0.1);
+  dot.style.cssText = `position:absolute;width:${size}px;height:${size}px;border-radius:50%;
+    background:rgba(100,120,200,${Math.max(0.03, 0.25 - i*0.005)});transform:translate(-50%,-50%);`;
+  trailContainer.appendChild(dot);
+  trailDots.push({ el: dot, x: 0, y: 0 });
+}
+
+for (let i = 0; i < TRAIL_COUNT; i++) {
+  const dot = document.createElement('div');
+  dot.style.cssText = `position:absolute;width:${80 - i*3}px;height:${80 - i*3}px;border-radius:50%;
+    background:radial-gradient(circle,rgba(100,140,220,${0.12 - i*0.005}) 0%,transparent 70%);
+    transform:translate(-50%,-50%);opacity:0;filter:blur(${8 + i}px);`;
+  trailContainer.appendChild(dot);
+  trailDots.push({ el: dot, x: 0, y: 0 });
+}
+
+const mousePos = { x: 0, y: 0, history: [] };
+
+document.addEventListener('pointermove', e => {
+  mousePos.x = e.clientX;
+  mousePos.y = e.clientY;
+  mousePos.history.push({ x: e.clientX, y: e.clientY });
+  if (mousePos.history.length > TRAIL_COUNT) mousePos.history.shift();
+});
+
+// Clear trail when pointer leaves (prevents ghost trails on mobile)
+document.addEventListener('pointerleave', () => {
+  mousePos.history = [];
+  trailDots.forEach(d => { d.el.style.opacity = '0'; });
+});
+document.addEventListener('pointercancel', () => {
+  mousePos.history = [];
+  trailDots.forEach(d => { d.el.style.opacity = '0'; });
+});
+
+function updateTrail() {
+  // Skip trail rendering on mobile to avoid ghost trails
+  if (!isMobile) {
+    for (let i = 0; i < TRAIL_COUNT; i++) {
+      const idx = mousePos.history.length - 1 - i;
+      if (idx >= 0) {
+        const p = mousePos.history[idx];
+        trailDots[i].x += (p.x - trailDots[i].x) * (0.5 - i * 0.02);
+        trailDots[i].y += (p.y - trailDots[i].y) * (0.5 - i * 0.02);
+        trailDots[i].el.style.left = trailDots[i].x + 'px';
+        trailDots[i].el.style.top = trailDots[i].y + 'px';
+        trailDots[i].el.style.opacity = 1 - i / TRAIL_COUNT;
+      }
+    }
+  }
+  requestAnimationFrame(updateTrail);
+}
+updateTrail();
+
+// ═══ Unlock audio on first user gesture ═══
+const _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+if (_audioCtx.state === 'suspended') _audioCtx.resume();
+document.addEventListener('click', () => { if (_audioCtx.state === 'suspended') _audioCtx.resume(); }, { once: true });
+
+// ═══ State ═══
+let currentUrl = '', currentQuality = '1080p', currentType = 'video';
+let currentVideoUrl = '', currentContentType = 'video';
+let currentImages = [], currentPhotoIdx = 0;
+let currentLivePhotos = [], currentLivePhotoIdx = 0;
+
+const card = document.getElementById('magicCard');
+const inputLayer = document.getElementById('inputLayer');
+const dropletLayer = document.getElementById('dropletLayer');
+const resultLayer = document.getElementById('resultLayer');
+
+// ═══ Glow burst trigger (GSAP) ═══
+const burstRing = document.getElementById('burstRing');
+let burstTl = null;
+
+function triggerBurst() {
+  if (burstTl) burstTl.kill();
+  burstTl = gsap.timeline();
+  burstTl.fromTo(burstRing,
+    { opacity: 0, scale: 0.85, filter: 'blur(8px)' },
+    { opacity: 1, scale: 1.05, filter: 'blur(0px)', duration: 0.3, ease: 'power3.out' }
+  );
+  burstTl.to(burstRing,
+    { opacity: 0, scale: 1.15, filter: 'blur(6px)', duration: 0.5, ease: 'power2.in' }
+  );
+  burstTl.set(burstRing, { scale: 1, filter: 'blur(0px)' });
+}
+
+// ═══ Loading animation (GSAP loop) ═══
+let loadingTl = null;
+function startLoadingAnim() {
+  stopLoadingAnim();
+  const dots = document.querySelectorAll('#loadingDots div');
+  loadingTl = gsap.timeline({ repeat: -1 });
+  // Rings: staggered pulse
+  loadingTl.fromTo('#ringOuter', { scale: 0.8, opacity: 0.3 }, { scale: 1.2, opacity: 0, duration: 1.2, ease: 'power1.out' }, 0);
+  loadingTl.fromTo('#ringInner', { scale: 0.9, opacity: 0.4 }, { scale: 1.15, opacity: 0, duration: 1, ease: 'power1.out' }, 0.2);
+  // Center dot: breathe
+  loadingTl.fromTo('#centerDot', { scale: 0.7, opacity: 0.4 }, { scale: 1.1, opacity: 0.8, duration: 0.6, ease: 'power2.inOut', yoyo: true, repeat: -1 }, 0);
+  // Dots: staggered bounce
+  loadingTl.fromTo(dots, { y: 0, opacity: 0.4 }, { y: -8, opacity: 1, duration: 0.35, ease: 'power2.out', stagger: { each: 0.12, repeat: -1, yoyo: true } }, 0);
+}
+function stopLoadingAnim() {
+  if (loadingTl) { loadingTl.kill(); loadingTl = null; }
+  gsap.set(['#ringOuter', '#ringInner', '#centerDot', '#loadingDots div'], { clearProps: 'all' });
+}
+
+// ═══ GSAP: Input → Droplet ═══
+function animateToDroplet() {
+  gsap.killTweensOf(card); gsap.killTweensOf(inputLayer);
+  triggerBurst();
+  gsap.to(inputLayer, { opacity: 0, y: -12, duration: 0.2, ease: 'power2.in' });
+  gsap.to(card, {
+    width: 140, minHeight: 140, borderRadius: '50%', padding: '24px',
+    duration: 0.9, ease: 'elastic.out(1, 0.4)',
+  });
+  dropletLayer.classList.remove('hidden');
+  gsap.fromTo(dropletLayer, { opacity: 0, scale: 0.5 }, {
+    opacity: 1, scale: 1, duration: 0.35, delay: 0.35, ease: 'power3.out',
+    onStart: startLoadingAnim,
+  });
+  resultLayer.classList.add('hidden');
+}
+
+// ═══ GSAP: Droplet → Result ═══
+function animateToResult() {
+  gsap.killTweensOf(card);
+  stopLoadingAnim();
+  triggerBurst();
+  gsap.to(dropletLayer, { opacity: 0, scale: 0.85, duration: 0.15, ease: 'power2.in', onComplete: () => dropletLayer.classList.add('hidden') });
+  gsap.to(card, {
+    width: Math.min(720, window.innerWidth - 32), minHeight: 420, borderRadius: '36px', padding: '36px 32px',
+    duration: 1.05, ease: 'elastic.out(1, 0.35)',
+  });
+  inputLayer.classList.add('hidden');
+  resultLayer.classList.remove('hidden');
+  const mp = document.getElementById('mediaPreview');
+  mp.classList.remove('hidden');
+  // Media preview: expand from center
+  gsap.fromTo(mp,
+    { opacity: 0, scale: 0.75, y: 20 },
+    { opacity: 1, scale: 1, y: 0, duration: 0.8, delay: 0.25, ease: 'back.out(1.4)', transformOrigin: 'center center' }
+  );
+  gsap.fromTo(resultLayer.children, { opacity: 0, y: 20 }, {
+    opacity: 1, y: 0, duration: 0.45, stagger: 0.04, delay: 0.55, ease: 'power3.out',
+  });
+}
+
+// ═══ Reset ═══
+function resetCard() {
+  gsap.killTweensOf(card);
+  gsap.killTweensOf(resultLayer);
+  gsap.killTweensOf(inputLayer);
+  stopLoadingAnim();
+
+  // Hide result + media preview
+  resultLayer.classList.add('hidden');
+  const mp = document.getElementById('mediaPreview');
+  mp.classList.add('hidden');
+  gsap.set(mp, { clearProps: 'all' });
+  gsap.set(resultLayer, { opacity: 0, clearProps: 'all' });
+  dropletLayer.classList.add('hidden');
+  gsap.set(dropletLayer, { opacity: 0, clearProps: 'all' });
+
+  // Stop video
+  const vp = document.getElementById('videoPlayer'); vp.pause(); vp.removeAttribute('src'); vp.muted = false;
+  document.getElementById('videoWrap').classList.remove('hidden');
+  document.getElementById('photoWrap').classList.add('hidden');
+  document.getElementById('photoDots').classList.add('hidden');
+  document.getElementById('qualityRow').classList.remove('hidden');
+  document.getElementById('typeRow').classList.remove('hidden');
+
+  // Morph card back to input shape
+  gsap.to(card, {
+    width: Math.min(680, window.innerWidth - 32), minHeight: 200, borderRadius: '36px', padding: '36px 32px',
+    duration: 0.7, ease: 'power3.out',
+  });
+
+  // Show input with entrance
+  inputLayer.classList.remove('hidden');
+  gsap.fromTo(inputLayer.children, { opacity: 0, y: -6 }, {
+    opacity: 1, y: 0, duration: 0.3, stagger: 0.03, delay: 0.3, ease: 'power2.out',
+  });
+
+  currentUrl = ''; currentVideoUrl = ''; currentContentType = 'video';
+  document.getElementById('urlInput').value = '';
+  document.getElementById('parseBtn').disabled = false;
+  document.getElementById('downloadBtn').disabled = true;
+}
+
+// ═══ Actions ═══
+async function pasteAndParse() {
+  try { const t = await navigator.clipboard.readText(); if (t) { document.getElementById('urlInput').value = t; parseVideo(); } }
+  catch { showToast('Unable to paste', 'error'); }
+}
+
+// ═══ Button select animation (GSAP) ═══
+function animateSelectBtn(el) {
+  gsap.killTweensOf(el);
+  gsap.set(el, { '--glow-angle': '0deg' });
+  const tl = gsap.timeline();
+  tl.to(el, { scale: 1.15, '--glow-angle': '360deg', duration: 0.35, ease: 'power2.out' });
+  tl.to(el, { scale: 1.0, '--glow-angle': '720deg', duration: 0.45, ease: 'power2.inOut' });
+  return tl;
+}
+
+function setType(t) {
+  currentType = t;
+  document.querySelectorAll('.type-btn').forEach(b => {
+    const active = b.dataset.t === t;
+    b.className = active
+      ? 'type-btn btn-glass-active rounded-[16px] py-2.5 flex-1 text-xs text-center'
+      : 'type-btn btn-glass rounded-[16px] py-2.5 flex-1 text-xs text-center';
+    if (active) animateSelectBtn(b);
+  });
+  updateLabel();
+}
+
+function updateLabel() {
+  document.getElementById('downloadText').textContent =
+    currentContentType === 'photo'
+      ? currentType === 'mp3' ? 'Download MP3'
+      : currentType === 'video' ? 'Download Slideshow'
+      : 'Download'
+    : currentType === 'mp3' ? 'Download MP3'
+    : 'Download';
+}
+
+function setQuality(q) {
+  currentQuality = q;
+  document.querySelectorAll('.quality-btn').forEach(b => {
+    const active = b.dataset.q === q;
+    b.className = active
+      ? 'quality-btn btn-glass-active rounded-[16px] py-2.5 px-3 flex-1 text-xs text-center'
+      : 'quality-btn btn-glass rounded-[16px] py-2.5 px-3 flex-1 text-xs text-center';
+    if (active) animateSelectBtn(b);
+  });
+  if (currentVideoUrl && currentContentType === 'video') {
+    const p = document.getElementById('videoPlayer'); const playing = !p.paused;
+    p.src = '/api/stream?video_url=' + encodeURIComponent(currentVideoUrl) + '&quality=' + q;
+    p.load(); if (playing) p.play();
+  }
+}
+
+function showPhoto(idx) {
+  if (idx === currentPhotoIdx && document.getElementById('photoDisplay').src === currentImages[idx]) return;
+  currentPhotoIdx = idx;
+
+  // GSAP image transition
+  const img = document.getElementById('photoDisplay');
+  gsap.to(img, {
+    opacity: 0, scale: 0.95, duration: 0.2, ease: 'power3.in',
+    onComplete: () => {
+      img.src = currentImages[idx];
+      gsap.fromTo(img,
+        { opacity: 0, scale: 1.03, filter: 'blur(4px)' },
+        { opacity: 1, scale: 1, filter: 'blur(0px)', duration: 0.4, ease: 'power3.out' }
+      );
+    }
+  });
+
+  // Update slider if exists
+  const slider = document.getElementById('photoSlider');
+  if (slider) {
+    const pct = (idx / (currentImages.length - 1)) * 100;
+    gsap.to('#sliderFill', {
+      width: idx === 0 ? '0%' : `calc(${pct}% - 20px)`,
+      duration: 0.4,
+      ease: 'power3.out'
+    });
+    // Update dots
+    document.querySelectorAll('.slider-dot').forEach((d, i) => {
+      if (i === idx) {
+        d.innerHTML = '<div class="absolute inset-0 rounded-full backdrop-blur-sm bg-gradient-to-br from-blue-400/10 via-purple-500/10 to-pink-400/10 animate-pulse"></div>';
+        d.className = 'slider-dot slider-dot-active-glow absolute w-[40px] h-[25px] -ml-[20px] rounded-full cursor-pointer hover:scale-125 transition-all border-2 border-white/80 bg-white/40 backdrop-blur-sm overflow-hidden';
+      } else {
+        d.innerHTML = '';
+        d.className = 'slider-dot absolute w-1.5 h-1.5 -ml-[3px] rounded-full cursor-pointer hover:scale-125 transition-all bg-red-300/60 hover:bg-red-300';
+      }
+    });
+    document.getElementById('sliderLabel').textContent = `${idx + 1}/${currentImages.length}`;
+  }
+}
+
+function buildPhotoSlider(count) {
+  const pDots = document.getElementById('photoDots');
+
+  // Build dot markers
+  let dotsHtml = '';
+  for (let i = 0; i < count; i++) {
+    const pct = (i / (count - 1)) * 100;
+    const isActive = i === 0;
+    const dotClass = isActive
+      ? 'slider-dot slider-dot-active-glow absolute w-[40px] h-[25px] -ml-[20px] rounded-full cursor-pointer hover:scale-125 transition-all border-2 border-white/80 bg-white/40 backdrop-blur-sm'
+      : 'slider-dot absolute w-1.5 h-1.5 -ml-[3px] rounded-full cursor-pointer hover:scale-125 transition-all bg-red-300/60 hover:bg-red-300';
+    const innerHtml = isActive
+      ? '<div class="absolute inset-0 rounded-full backdrop-blur-sm bg-gradient-to-br from-blue-400/10 via-purple-500/10 to-pink-400/10 animate-pulse"></div>'
+      : '';
+    dotsHtml += `<div class="${dotClass}"
+      style="left: ${pct}%; top: 50%; transform: translateY(-50%); z-index: 15; pointer-events: none"
+      >${innerHtml}</div>`;
+  }
+
+  pDots.innerHTML = `
+    <div class="relative flex items-center gap-3 w-full px-2">
+      <div class="relative flex-1 h-6 flex items-center">
+        <!-- Background track -->
+        <div class="absolute w-full h-[3px] bg-black/5 rounded-full z-0"></div>
+        <!-- Fill track - glowing stream -->
+        <div id="sliderFill" class="slider-fill-stream absolute z-10"
+          style="width: 0"></div>
+        <!-- Dot markers -->
+        ${dotsHtml}
+        <!-- Slider input -->
+        <input id="photoSlider" type="range" min="0" max="${count - 1}" value="0"
+          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+          oninput="showPhoto(parseInt(this.value))">
+      </div>
+      <span id="sliderLabel" class="text-xs text-black/50 font-mono min-w-[3rem] text-right">1/${count}</span>
+    </div>
+  `;
+}
+
+function showLivePhoto(idx) {
+  if (!currentLivePhotos || idx < 0 || idx >= currentLivePhotos.length) return;
+  currentLivePhotoIdx = idx;
+  currentVideoUrl = currentLivePhotos[idx];
+  const p = document.getElementById('videoPlayer');
+  p.src = '/api/stream?video_url=' + encodeURIComponent(currentVideoUrl) + '&quality=' + currentQuality;
+  p.load();
+  p.play().catch(() => {});
+  document.querySelectorAll('#photoDots button').forEach((d, i) => {
+    d.className = i === idx ? 'w-2 h-2 rounded-full bg-black/40' : 'w-2 h-2 rounded-full bg-black/10';
+  });
+}
+
+async function parseVideo() {
+  const input = document.getElementById('urlInput');
+  let text = input.value.trim();
+  if (!text) return showToast('Please enter a link', 'error');
+  const m = text.match(/https?:\/\/\S+|v\.douyin\.com\/\S+|vm\.tiktok\.com\/\S+|vt\.tiktok\.com\/\S+|t\.co\/\S+|b23\.tv\/\S+/i);
+  if (m) { text = m[0].replace(/[.,;:!?，。；：！？)]+$/, ''); }
+  if (!text.startsWith('http://') && !text.startsWith('https://')) { text = 'https://' + text; }
+  input.value = text; currentUrl = text;
+  document.getElementById('parseBtn').disabled = true;
+
+  animateToDroplet();
+
+  try {
+    const res = await fetch('/api/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: text }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Parse failed');
+    buildResult(data);
+    animateToResult();
+  } catch (e) {
+    // Kill all active animations
+    gsap.killTweensOf(card);
+    gsap.killTweensOf(inputLayer);
+    gsap.killTweensOf(dropletLayer);
+    gsap.killTweensOf(resultLayer);
+    gsap.killTweensOf(burstRing);
+    gsap.killTweensOf(document.getElementById('mediaPreview'));
+    stopLoadingAnim();
+
+    // Hide droplet and result immediately
+    dropletLayer.classList.add('hidden');
+    resultLayer.classList.add('hidden');
+    document.getElementById('mediaPreview').classList.add('hidden');
+
+    // Reset card to input state
+    gsap.set(card, { width: Math.min(680, window.innerWidth - 32), minHeight: 200, borderRadius: '36px', padding: '36px 32px' });
+    inputLayer.classList.remove('hidden');
+    gsap.fromTo(inputLayer, { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out' });
+    document.getElementById('parseBtn').disabled = false;
+    showToast(e.message, 'error');
+  }
+}
+
+function buildResult(data) {
+  const qRow = document.getElementById('qualityRow'), tRow = document.getElementById('typeRow');
+  const vWrap = document.getElementById('videoWrap'), pWrap = document.getElementById('photoWrap'), pDots = document.getElementById('photoDots');
+
+  if (data.type === 'photo') {
+    currentContentType = 'photo'; currentImages = data.images || [];
+    vWrap.classList.add('hidden'); pWrap.classList.remove('hidden'); pDots.classList.remove('hidden');
+    document.getElementById('landscapeBtn').classList.add('hidden');
+    document.getElementById('saveImageBtn').classList.remove('hidden');
+    qRow.classList.add('hidden'); tRow.classList.add('hidden'); currentVideoUrl = '';
+    if (data.music_url) { tRow.classList.remove('hidden'); setType('video'); }
+    // Show slider for 3+ images, dots for fewer
+    if (currentImages.length > 2) {
+      buildPhotoSlider(currentImages.length);
+    } else {
+      let ds = '';
+      currentImages.forEach((_, i) => { ds += `<button onclick="showPhoto(${i})" class="w-2 h-2 rounded-full ${i===0?'bg-black/40':'bg-black/10'}"></button>`; });
+      pDots.innerHTML = ds;
+    }
+    showPhoto(0);
+    document.getElementById('platformTag').textContent = `Douyin · ${currentImages.length} Photos`;
+  } else if (data.type === 'live_photo') {
+    // Live photo with animated images and/or photos
+    currentContentType = 'live_photo';
+    currentVideoUrl = data.video_url;
+    currentLivePhotos = data.video_urls || [];
+    currentLivePhotoIdx = 0;
+    currentImages = data.images || [];
+    currentPhotoIdx = 0;
+
+    // Show video by default
+    vWrap.classList.remove('hidden');
+    qRow.classList.remove('hidden'); tRow.classList.remove('hidden');
+    document.getElementById('landscapeBtn').classList.remove('hidden');
+    const p = document.getElementById('videoPlayer');
+    p.poster = data.thumbnail;
+    p.muted = false;
+    p.src = '/api/stream?video_url=' + encodeURIComponent(data.video_url) + '&quality=' + currentQuality;
+    p.load();
+    p.play().catch(() => {});
+
+    // Show photo section if images exist
+    if (currentImages.length > 0) {
+      pWrap.classList.remove('hidden');
+      document.getElementById('photoDisplay').src = currentImages[0];
+      document.getElementById('saveImageBtn').classList.remove('hidden');
+    } else {
+      pWrap.classList.add('hidden');
+      document.getElementById('saveImageBtn').classList.add('hidden');
+    }
+
+    // Show dots for videos + images
+    let ds = '';
+    currentLivePhotos.forEach((_, i) => { ds += `<button onclick="showLivePhoto(${i})" class="w-2 h-2 rounded-full ${i===0?'bg-black/40':'bg-black/10'}"></button>`; });
+    if (currentImages.length > 0) {
+      ds += `<span class="mx-1">|</span>`;
+      currentImages.forEach((_, i) => { ds += `<button onclick="showPhoto(${i})" class="w-2 h-2 rounded-full bg-black/10"></button>`; });
+    }
+    pDots.innerHTML = ds;
+    pDots.classList.remove('hidden');
+
+    const totalItems = currentLivePhotos.length + currentImages.length;
+    document.getElementById('platformTag').textContent = `Douyin · Live Photo (${totalItems} items)`;
+    setQuality(currentQuality); setType('video');
+  } else {
+    currentContentType = 'video'; currentVideoUrl = data.video_url;
+    vWrap.classList.remove('hidden'); pWrap.classList.add('hidden'); pDots.classList.add('hidden');
+    qRow.classList.remove('hidden'); tRow.classList.remove('hidden');
+    document.getElementById('landscapeBtn').classList.remove('hidden');
+    document.getElementById('saveImageBtn').classList.add('hidden');
+    const p = document.getElementById('videoPlayer');
+    p.poster = data.thumbnail;
+    p.muted = false;
+    p.src = '/api/stream?video_url=' + encodeURIComponent(data.video_url) + '&quality=' + currentQuality;
+    p.load();
+    p.play().catch(() => {});
+    const platformNames = {tiktok:'TikTok',twitter:'X / Twitter',bilibili:'Bilibili',kuaishou:'快手'};
+    document.getElementById('platformTag').textContent = platformNames[data.platform] || 'Douyin';
+    setQuality(currentQuality); setType('video');
+  }
+  document.getElementById('videoTitle').textContent = data.title;
+  document.getElementById('downloadBtn').disabled = false;
+  document.getElementById('parseBtn').disabled = false;
+  updateLabel();
+}
+
+// ═══ Download ═══
+async function saveCurrentImage() {
+  if (!currentUrl) return;
+  const btn = document.getElementById('saveImageBtn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, type: 'image', image_index: currentPhotoIdx }) });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+    const blob = await res.blob();
+    let fn = 'image.webp';
+    const disp = res.headers.get('Content-Disposition') || '';
+    const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+    if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+  } catch (e) { showToast(e.message || 'Failed', 'error'); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+async function downloadCurrentPhoto() {
+  if (!currentUrl) return;
+  const btn = document.getElementById('downloadBtn'); btn.disabled = true;
+  document.getElementById('downloadText').textContent = 'Downloading...';
+  document.getElementById('downloadSpinner').classList.remove('hidden');
+  try {
+    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, type: currentType, image_index: currentPhotoIdx }) });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+    const blob = await res.blob();
+    let fn = 'image.webp';
+    const disp = res.headers.get('Content-Disposition') || '';
+    const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+    if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+  } catch (e) { showToast(e.message || 'Failed', 'error'); }
+  finally { btn.disabled = false; document.getElementById('downloadSpinner').classList.add('hidden'); document.getElementById('downloadText').textContent = 'Download Image'; }
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+async function downloadVideo() {
+  if (!currentUrl) return;
+  if (currentContentType === 'photo') return downloadCurrentPhoto();
+  const btn = document.getElementById('downloadBtn'); btn.disabled = true;
+  const textEl = document.getElementById('downloadText');
+  const spinner = document.getElementById('downloadSpinner');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressBar = document.getElementById('progressBar');
+  const progressText = document.getElementById('progressText');
+  textEl.textContent = 'Downloading...';
+  spinner.classList.remove('hidden');
+  progressWrap.classList.remove('hidden');
+  progressBar.style.width = '0%';
+  progressText.textContent = '';
+
+  try {
+    const resp = await fetch('/api/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: currentUrl, quality: currentQuality, type: currentType })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || 'Download failed');
+    }
+
+    const contentLength = parseInt(resp.headers.get('Content-Length') || '0', 10);
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (contentLength > 0) {
+        const pct = Math.round((received / contentLength) * 100);
+        progressBar.style.width = pct + '%';
+        progressText.textContent = pct + '% · ' + formatSize(received) + ' / ' + formatSize(contentLength);
+      } else {
+        progressText.textContent = formatSize(received);
+      }
+    }
+
+    const blob = new Blob(chunks);
+    let fn = 'video.mp4';
+    const disp = resp.headers.get('Content-Disposition') || '';
+    const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+    if (rfc) fn = decodeURIComponent(rfc[1]);
+    else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+    progressBar.style.width = '100%';
+    progressText.textContent = 'Done!';
+    updateLabel();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    spinner.classList.add('hidden');
+    setTimeout(() => { progressWrap.classList.add('hidden'); }, 3000);
+  }
+}
+
+// ═══ Helpers ═══
+function showToast(msg, type) {
+  const c = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = `toast-widget text-xs px-4 py-3 rounded-[20px] ${type === 'error' ? 'text-red-600/80' : 'text-emerald-600/80'}`;
+  t.textContent = msg; c.appendChild(t);
+  gsap.fromTo(t, { opacity: 0, y: -12, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.35, ease: 'power3.out' });
+  setTimeout(() => {
+    gsap.to(t, { opacity: 0, y: -12, scale: 0.96, duration: 0.25, ease: 'power3.in', onComplete: () => t.remove() });
+  }, 2800);
+}
+
+document.getElementById('urlInput').addEventListener('keydown', e => { if (e.key === 'Enter') parseVideo(); });
+
+const vp = document.getElementById('videoPlayer');
+const lh = document.getElementById('loadingHint');
+vp.addEventListener('waiting', () => lh.classList.remove('hidden'));
+vp.addEventListener('playing', () => lh.classList.add('hidden'));
+
+vp.addEventListener('canplay', () => lh.classList.add('hidden'));
+
+// ═══ Version dropdown ═══
+document.addEventListener('click', e => {
+  const menu = document.getElementById('versionMenu');
+  const dropdown = document.getElementById('versionDropdown');
+  if (!menu.contains(e.target)) dropdown.classList.add('hidden');
+  else if (e.target.closest('button')) dropdown.classList.toggle('hidden');
+});
+
+// ─── Page load animation ───
+window.addEventListener('DOMContentLoaded', () => {
+  gsap.fromTo(card, { opacity: 0, y: 30, scale: 0.97 }, {
+    opacity: 1, y: 0, scale: 1, duration: 0.8, ease: 'power3.out',
+    onStart: () => triggerBurst(),
+  });
+});
+</script>
+
+
+</body>
+</html>

@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频下载器</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<style>
+/* Ensure interactive elements are clickable */
+#inputLayer, #dropletLayer, #resultLayer { position: relative; z-index: 3; }
+#dropletLayer { pointer-events: none; }
+#inputLayer *, #resultLayer * { pointer-events: auto; }
+</style>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600&display=swap');
+
+:root {
+  --glass-bg: rgba(255,255,255,0.04);
+  --glass-border: rgba(255,255,255,0.06);
+  --glass-highlight: rgba(255,255,255,0.02);
+  --glass-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  --text-primary: rgba(255,255,255,0.92);
+  --text-secondary: rgba(255,255,255,0.55);
+  --text-tertiary: rgba(255,255,255,0.32);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #000;
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ─── Ambient background ─── */
+.bg-ambient {
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 25% 25%, rgba(160,100,255,0.45), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 75% 40%, rgba(80,160,255,0.35), transparent 55%),
+    radial-gradient(ellipse 60% 45% at 40% 70%, rgba(200,100,180,0.3), transparent 60%),
+    radial-gradient(ellipse 40% 30% at 60% 85%, rgba(100,200,255,0.25), transparent 50%),
+    #050510;
+}
+.bg-ambient::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 30% 25% at 50% 50%, rgba(255,255,255,0.08), transparent);
+}
+
+/* ─── Liquid Glass base ─── */
+.glass {
+  background: rgba(255,255,255,0.008);
+  backdrop-filter: blur(80px) saturate(200%);
+  -webkit-backdrop-filter: blur(80px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow:
+    0 0 20px rgba(255,255,255,0.01),
+    0 0 40px rgba(100,120,255,0.04),
+    0 0 0 0.5px rgba(255,255,255,0.04) inset;
+}
+
+.glass-surface {
+  background: rgba(255,255,255,0.006);
+  backdrop-filter: blur(100px) saturate(220%);
+  -webkit-backdrop-filter: blur(100px) saturate(220%);
+  border: 1px solid rgba(255,255,255,0.06);
+  position: relative;
+  box-shadow:
+    0 0 20px rgba(255,255,255,0.01),
+    0 0 60px rgba(100,120,255,0.05),
+    0 0 0 0.5px rgba(255,255,255,0.07) inset,
+    0 1px 0 rgba(255,255,255,0.02) inset,
+    0 24px 64px rgba(0,0,0,0.5);
+}
+.glass-surface::before {
+  content: ''; position: absolute; inset: -2px; border-radius: inherit;
+  background: linear-gradient(180deg, rgba(120,100,255,0.06), transparent 70%);
+  z-index: -1; pointer-events: none;
+  filter: blur(15px);
+}
+
+.glass-card {
+  background: rgba(255,255,255,0.008);
+  backdrop-filter: blur(60px) saturate(200%);
+  -webkit-backdrop-filter: blur(60px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.08);
+  position: relative;
+  box-shadow:
+    0 0 30px rgba(255,255,255,0.01),
+    0 0 80px rgba(100,120,255,0.06),
+    0 0 150px rgba(100,120,255,0.02),
+    0 0 0 0.5px rgba(255,255,255,0.08) inset,
+    0 1px 0 rgba(255,255,255,0.03) inset,
+    0 16px 48px rgba(0,0,0,0.5),
+    0 4px 12px rgba(0,0,0,0.3);
+}
+.glass-card::before {
+  content: ''; position: absolute; inset: -2px; border-radius: inherit;
+  background: linear-gradient(135deg, rgba(120,100,255,0.07), transparent 40%, transparent 60%, rgba(100,150,255,0.04));
+  z-index: -1; pointer-events: none;
+  filter: blur(20px);
+}
+
+/* ─── Input ─── */
+.glass-input {
+  background: rgba(255,255,255,0.006);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: var(--text-primary);
+  font-family: inherit;
+  outline: none;
+}
+.glass-input::placeholder { color: var(--text-tertiary); }
+.glass-input:focus {
+  border-color: rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.012);
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.01), 0 0 20px rgba(120,100,255,0.05);
+}
+
+/* ─── Buttons ─── */
+.btn-glass {
+  font-family: inherit; font-weight: 500; font-size: 14px;
+  background: rgba(255,255,255,0.01);
+  border: 1px solid rgba(255,255,255,0.07);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.03) inset;
+}
+.btn-glass:hover {
+  background: rgba(255,255,255,0.03);
+  border-color: rgba(255,255,255,0.12);
+  color: var(--text-primary);
+}
+.btn-glass:active { background: rgba(255,255,255,0.03); transform: scale(0.985); }
+
+.btn-glass-active {
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(255,255,255,0.15) !important;
+  color: var(--text-primary) !important;
+}
+
+.btn-primary {
+  font-family: inherit; font-weight: 500; font-size: 14px;
+  background: rgba(255,255,255,0.9);
+  border: none;
+  color: #000;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.btn-primary:hover { background: rgba(255,255,255,0.95); }
+.btn-primary:active { background: rgba(255,255,255,0.7); transform: scale(0.985); }
+.btn-primary:disabled { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.2); cursor: not-allowed; }
+
+.btn-accent {
+  font-family: inherit; font-weight: 500; font-size: 14px;
+  background: rgba(100,120,255,0.2);
+  border: 1px solid rgba(100,120,255,0.2);
+  color: rgba(180,200,255,0.9);
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.btn-accent:hover { background: rgba(100,120,255,0.28); border-color: rgba(100,120,255,0.3); }
+.btn-accent:active { transform: scale(0.985); }
+.btn-accent:disabled { opacity: 0.25; cursor: not-allowed; }
+
+/* ─── Spinner ─── */
+.spinner {
+  width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,0.1);
+  border-top: 2px solid rgba(255,255,255,0.5);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Video player ─── */
+.video-frame {
+  background: #000;
+  overflow: hidden;
+}
+#videoWrap {
+  background: transparent;
+}
+#navBar { transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
+#navBar.expanded { padding: 32px; min-height: 220px; }
+#navBar.expanded #navTag { display: none !important; }
+video::-webkit-media-controls-panel {
+  background: linear-gradient(transparent, rgba(0,0,0,0.4)) !important;
+}
+video::-webkit-media-controls-enclosure {
+  background: transparent !important;
+}
+
+/* ─── Toast ─── */
+.toast-widget {
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(60px);
+  -webkit-backdrop-filter: blur(60px);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="bgLayer" class="bg-ambient"></div>
+
+<div class="relative z-10 min-h-screen flex flex-col">
+
+  <!-- ─── Navigation bar ─── -->
+  <nav id="navBar" class="glass-surface shrink-0 mx-4 mt-3 rounded-[28px] px-5 py-3 flex items-center justify-between transition-all duration-500" style="will-change:transform">
+    <div id="navNormal" class="flex items-center gap-2.5">
+      <img src="/static/logo.jpg" alt="" class="h-10 w-auto rounded cursor-pointer" onclick="document.getElementById('navBar').classList.toggle('expanded');document.getElementById('navNormal').classList.toggle('hidden');document.getElementById('navExpanded').classList.toggle('hidden');">
+      <span class="text-sm font-medium text-white/70 tracking-wide">fzpnowm.top</span>
+    </div>
+    <div id="navExpanded" class="hidden w-full flex items-center justify-center gap-6 py-2">
+      <img src="/static/logo.jpg" alt="" class="h-28 w-auto rounded-xl cursor-pointer" onclick="document.getElementById('navBar').classList.toggle('expanded');document.getElementById('navNormal').classList.toggle('hidden');document.getElementById('navExpanded').classList.toggle('hidden');">
+      <p style="font-family:'STXingkai','华文行楷','KaiTi','楷体',serif;font-size:24px;letter-spacing:5px;" class="text-white/85">以少年之身，逆既定之命</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="navTag" class="text-[11px] text-white/20 hidden sm:inline tracking-wide">Douyin · X · B站 · 快手 · TikTok</span>
+      <div class="relative" id="versionMenu">
+        <button onclick="document.getElementById('versionMenu').classList.toggle('open')" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors border border-white/10">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+        </button>
+        <div class="hidden absolute right-0 top-10 w-40 py-1.5 rounded-2xl bg-black/70 backdrop-blur-xl border border-white/10 shadow-lg z-50" id="versionDropdown">
+          <a href="/" class="block px-4 py-2 text-xs text-white/60 hover:text-white hover:bg-white/10 transition-colors">🤍 Liquid Glass 3.0</a>
+          <a href="/v1" class="block px-4 py-2 text-xs text-white font-medium bg-white/10 transition-colors">🖤 经典暗色版 ✓</a>
+          <a href="/v2" class="block px-4 py-2 text-xs text-white/60 hover:text-white hover:bg-white/10 transition-colors">💎 WebGL 液态玻璃</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ─── Main content ─── -->
+  <div class="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 gap-5">
+
+    <!-- ═══ Media Preview (outside card, no glass) ═══ -->
+    <div id="mediaPreview" class="hidden w-full" style="max-width:960px;">
+      <div class="rounded-[24px] overflow-hidden relative" style="box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+        <div id="videoWrap" class="aspect-video">
+          <video id="videoPlayer" controls playsinline class="w-full h-full object-contain"></video>
+        </div>
+        <div id="photoWrap" class="hidden">
+          <img id="photoDisplay" src="" alt="" class="w-full object-contain max-h-80 mx-auto">
+        </div>
+        <div id="loadingHint" class="hidden absolute inset-0 flex items-center justify-center bg-black/80 text-xs text-white/30">Loading...</div>
+        <button id="landscapeBtn" onclick="var outer=this.parentElement;var mp=document.getElementById('mediaPreview');var vw=document.getElementById('videoWrap');var vp=document.getElementById('videoPlayer');this.classList.toggle('active');if(this.classList.contains('active')){mp.style.maxWidth='480px';vw.style.aspectRatio='9/16';vp.removeAttribute('controls');setTimeout(function(){var w=vw.clientWidth;var h=vw.clientHeight;outer.style.transform='rotate(-90deg)';outer.style.transformOrigin='center center';outer.style.marginBottom=-(h-w)/2+'px'},50)}else{mp.style.maxWidth='960px';vw.style.aspectRatio='16/9';vp.setAttribute('controls','');outer.style.transform='';outer.style.marginBottom=''}" title="横屏模式" class="absolute bottom-3 right-3 z-10 w-9 h-9 rounded-full bg-white/20 hover:bg-white/35 flex items-center justify-center transition-colors border border-white/20" style="backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10v4M17 10v4"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══ MAGIC CARD (controls only) ═══ -->
+    <div id="magicCard" class="glass-card relative z-10 flex flex-col items-center"
+         style="width:min(680px,100%); border-radius:36px; padding:36px 32px; will-change:transform,border-radius,width,height,padding;">
+
+      <!-- ── State 1: Input ── -->
+      <div id="inputLayer" class="w-full flex flex-col items-center gap-6">
+        <div class="text-center">
+          <p class="text-sm font-medium text-white/60 tracking-tight mb-1">Paste a link to download</p>
+          <p class="text-xs text-white/25">No watermarks. Free.</p>
+        </div>
+
+        <div class="w-full flex gap-2">
+          <input id="urlInput" type="text" placeholder="Share link..." autocomplete="off"
+            class="glass-input flex-1 text-sm rounded-[20px] px-5 py-3.5">
+          <button onclick="pasteAndParse()"
+            class="btn-glass shrink-0 rounded-[20px] px-4 flex items-center gap-1.5">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/>
+            </svg>
+            <span class="hidden sm:inline text-xs">Paste</span>
+          </button>
+          <button id="parseBtn" onclick="parseVideo()"
+            class="btn-primary shrink-0 rounded-[20px] px-5 py-3.5 flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.2-5.2"/><circle cx="11" cy="11" r="8"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- ── State 2: Loading droplet ── -->
+      <div id="dropletLayer" class="hidden absolute inset-0 flex flex-col items-center justify-center gap-6">
+        <div class="relative w-16 h-16 flex items-center justify-center">
+          <div class="absolute inset-0 rounded-full border border-white/[0.04] animate-ping"></div>
+          <div class="absolute inset-2 rounded-full border border-white/[0.06] animate-pulse"></div>
+          <div class="w-3 h-3 rounded-full bg-white/40"></div>
+        </div>
+        <div class="flex gap-1.5">
+          <div class="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce"></div>
+          <div class="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce" style="animation-delay:.12s"></div>
+          <div class="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce" style="animation-delay:.24s"></div>
+        </div>
+      </div>
+
+      <!-- ── State 3: Result ── -->
+      <div id="resultLayer" class="hidden w-full flex flex-col gap-5">
+        <!-- Title -->
+        <div>
+          <span id="platformTag" class="inline-block text-[11px] font-medium text-white/30 tracking-wide uppercase mb-1.5"></span>
+          <h3 id="videoTitle" class="text-sm font-medium text-white/85 leading-relaxed line-clamp-2"></h3>
+        </div>
+
+        <!-- Photo dots -->
+        <div id="photoDots" class="hidden flex items-center justify-center gap-2"></div>
+
+        <!-- Save current image button -->
+        <button id="saveImageBtn" onclick="saveCurrentImage()" class="hidden btn-glass w-full rounded-[16px] py-2.5 text-xs flex items-center justify-center gap-1.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Save Image
+        </button>
+
+        <!-- Quality -->
+        <div id="qualityRow" class="flex gap-1.5">
+          <button onclick="setQuality('720p')" data-q="720p" class="quality-btn btn-glass rounded-[16px] py-2.5 px-3 flex-1 text-xs text-center">720p</button>
+          <button onclick="setQuality('1080p')" data-q="1080p" class="quality-btn btn-glass rounded-[16px] py-2.5 px-3 flex-1 text-xs text-center">1080p</button>
+          <button onclick="setQuality('hd')" data-q="hd" class="quality-btn btn-glass rounded-[16px] py-2.5 px-3 flex-1 text-xs text-center">HD</button>
+        </div>
+
+        <!-- Type -->
+        <div id="typeRow" class="flex gap-2">
+          <button onclick="setType('video')" data-t="video" class="type-btn btn-glass rounded-[16px] py-2.5 flex-1 text-xs text-center">Video</button>
+          <button onclick="setType('mp3')" data-t="mp3" class="type-btn btn-glass rounded-[16px] py-2.5 flex-1 text-xs text-center">MP3</button>
+        </div>
+
+        <!-- Download -->
+        <button id="downloadBtn" onclick="downloadVideo()"
+          class="btn-accent w-full rounded-[20px] py-3.5 text-sm flex items-center justify-center gap-2">
+          <span id="downloadText">Download</span>
+          <div id="downloadSpinner" class="hidden spinner"></div>
+        </button>
+        <!-- Progress Bar -->
+        <div id="progressWrap" class="hidden w-full">
+          <div class="w-full h-1.5 rounded-full bg-white/5 overflow-hidden">
+            <div id="progressBar" class="h-full rounded-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300" style="width:0%"></div>
+          </div>
+          <p id="progressText" class="text-[11px] text-white/30 mt-1.5 text-center"></p>
+        </div>
+
+        <button onclick="location.reload()" class="w-full text-xs text-white/20 hover:text-white/35 py-1 transition-colors">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// Mouse Glow Trail
+// ═══════════════════════════════════════
+// ── Linear elastic trail dots ──
+const TRAIL_COUNT = 50;
+const trailDots = [];
+const trailContainer = document.createElement('div');
+trailContainer.style.cssText = 'position:fixed;inset:0;z-index:9998;pointer-events:none;';
+document.body.appendChild(trailContainer);
+
+for (let i = 0; i < TRAIL_COUNT; i++) {
+  const dot = document.createElement('div');
+  const size = Math.max(1.5, 6 - i * 0.1);
+  dot.style.cssText = `position:absolute;width:${size}px;height:${size}px;border-radius:50%;
+    background:rgba(200,210,255,${Math.max(0.04, 0.5 - i*0.01)});transform:translate(-50%,-50%);`;
+  trailContainer.appendChild(dot);
+  trailDots.push({ el: dot, x: 0, y: 0 });
+}
+
+for (let i = 0; i < TRAIL_COUNT; i++) {
+  const dot = document.createElement('div');
+  dot.style.cssText = `position:absolute;width:${80 - i*3}px;height:${80 - i*3}px;border-radius:50%;
+    background:radial-gradient(circle,rgba(120,120,255,${0.3 - i*0.013}) 0%,transparent 70%);
+    transform:translate(-50%,-50%);opacity:0;filter:blur(${8 + i}px);`;
+  trailContainer.appendChild(dot);
+  trailDots.push({ el: dot, x: 0, y: 0 });
+}
+
+const mousePos = { x: 0, y: 0, history: [] };
+document.addEventListener('pointermove', e => {
+  mousePos.x = e.clientX;
+  mousePos.y = e.clientY;
+  mousePos.history.push({ x: e.clientX, y: e.clientY });
+  if (mousePos.history.length > TRAIL_COUNT) mousePos.history.shift();
+});
+
+function updateTrail() {
+  for (let i = 0; i < TRAIL_COUNT; i++) {
+    const idx = mousePos.history.length - 1 - i;
+    if (idx >= 0) {
+      const p = mousePos.history[idx];
+      trailDots[i].x += (p.x - trailDots[i].x) * (0.5 - i * 0.02);
+      trailDots[i].y += (p.y - trailDots[i].y) * (0.5 - i * 0.02);
+      trailDots[i].el.style.left = trailDots[i].x + 'px';
+      trailDots[i].el.style.top = trailDots[i].y + 'px';
+      trailDots[i].el.style.opacity = 1 - i / TRAIL_COUNT;
+    }
+  }
+  requestAnimationFrame(updateTrail);
+}
+updateTrail();
+
+// ═══ State ═══
+let currentUrl = '', currentQuality = '1080p', currentType = 'video';
+let currentVideoUrl = '', currentContentType = 'video';
+let currentImages = [], currentPhotoIdx = 0;
+
+const card = document.getElementById('magicCard');
+const inputLayer = document.getElementById('inputLayer');
+const dropletLayer = document.getElementById('dropletLayer');
+const resultLayer = document.getElementById('resultLayer');
+
+// ═══ GSAP: Input → Droplet ═══
+function animateToDroplet() {
+  gsap.killTweensOf(card); gsap.killTweensOf(inputLayer);
+  gsap.to(inputLayer, { opacity: 0, y: -12, duration: 0.2, ease: 'power2.in' });
+  gsap.to(card, {
+    width: 140, minHeight: 140, borderRadius: '50%', padding: '24px',
+    duration: 0.9, ease: 'elastic.out(1, 0.4)',
+  });
+  dropletLayer.classList.remove('hidden');
+  gsap.fromTo(dropletLayer, { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.35, delay: 0.35, ease: 'power3.out' });
+  resultLayer.classList.add('hidden');
+}
+
+// ═══ GSAP: Droplet → Result ═══
+function animateToResult() {
+  gsap.killTweensOf(card);
+  gsap.to(dropletLayer, { opacity: 0, scale: 0.85, duration: 0.15, ease: 'power2.in', onComplete: () => dropletLayer.classList.add('hidden') });
+  gsap.to(card, {
+    width: Math.min(720, window.innerWidth - 32), minHeight: 420, borderRadius: '36px', padding: '36px 32px',
+    duration: 1.05, ease: 'elastic.out(1, 0.35)',
+  });
+  inputLayer.classList.add('hidden');
+  resultLayer.classList.remove('hidden');
+  document.getElementById('mediaPreview').classList.remove('hidden');
+  gsap.fromTo(resultLayer.children, { opacity: 0, y: 20 }, {
+    opacity: 1, y: 0, duration: 0.45, stagger: 0.04, delay: 0.55, ease: 'power3.out',
+  });
+}
+
+// ═══ Reset ═══
+function resetCard() {
+  gsap.killTweensOf(card);
+  gsap.killTweensOf(resultLayer);
+  gsap.killTweensOf(inputLayer);
+
+  // Hide result + media preview
+  resultLayer.classList.add('hidden');
+  document.getElementById('mediaPreview').classList.add('hidden');
+  gsap.set(resultLayer, { opacity: 0, clearProps: 'all' });
+  dropletLayer.classList.add('hidden');
+  gsap.set(dropletLayer, { opacity: 0, clearProps: 'all' });
+
+  // Stop video
+  const vp = document.getElementById('videoPlayer'); vp.pause(); vp.removeAttribute('src');
+  document.getElementById('videoWrap').classList.remove('hidden');
+  document.getElementById('photoWrap').classList.add('hidden');
+  document.getElementById('photoDots').classList.add('hidden');
+  document.getElementById('qualityRow').classList.remove('hidden');
+  document.getElementById('typeRow').classList.remove('hidden');
+
+  // Morph card back to input shape
+  gsap.to(card, {
+    width: Math.min(680, window.innerWidth - 32), minHeight: 200, borderRadius: '36px', padding: '36px 32px',
+    duration: 0.7, ease: 'power3.out',
+  });
+
+  // Show input with entrance
+  inputLayer.classList.remove('hidden');
+  gsap.fromTo(inputLayer.children, { opacity: 0, y: -6 }, {
+    opacity: 1, y: 0, duration: 0.3, stagger: 0.03, delay: 0.3, ease: 'power2.out',
+  });
+
+  currentUrl = ''; currentVideoUrl = ''; currentContentType = 'video';
+  document.getElementById('urlInput').value = '';
+  document.getElementById('parseBtn').disabled = false;
+  document.getElementById('downloadBtn').disabled = true;
+}
+
+// ═══ Actions ═══
+async function pasteAndParse() {
+  try { const t = await navigator.clipboard.readText(); if (t) { document.getElementById('urlInput').value = t; parseVideo(); } }
+  catch { showToast('Unable to paste', 'error'); }
+}
+
+function setType(t) {
+  currentType = t;
+  document.querySelectorAll('.type-btn').forEach(b => {
+    b.className = b.dataset.t === t
+      ? 'type-btn btn-glass-active rounded-[16px] py-2.5 flex-1 text-xs text-center'
+      : 'type-btn btn-glass rounded-[16px] py-2.5 flex-1 text-xs text-center';
+  });
+  updateLabel();
+}
+
+function updateLabel() {
+  document.getElementById('downloadText').textContent =
+    currentContentType === 'photo'
+      ? currentType === 'mp3' ? 'Download MP3'
+      : currentType === 'video' ? 'Download Slideshow'
+      : 'Download'
+    : currentType === 'mp3' ? 'Download MP3'
+    : 'Download';
+}
+
+function setQuality(q) {
+  currentQuality = q;
+  document.querySelectorAll('.quality-btn').forEach(b => {
+    b.className = b.dataset.q === q
+      ? 'quality-btn btn-glass-active rounded-[16px] py-2.5 px-3 flex-1 text-xs text-center'
+      : 'quality-btn btn-glass rounded-[16px] py-2.5 px-3 flex-1 text-xs text-center';
+  });
+  if (currentVideoUrl && currentContentType === 'video') {
+    const p = document.getElementById('videoPlayer'); const playing = !p.paused;
+    p.src = '/api/stream?video_url=' + encodeURIComponent(currentVideoUrl) + '&quality=' + q;
+    p.load(); if (playing) p.play();
+  }
+}
+
+function showPhoto(idx) {
+  currentPhotoIdx = idx;
+  document.getElementById('photoDisplay').src = currentImages[idx];
+  document.querySelectorAll('#photoDots button').forEach((d, i) => {
+    d.className = i === idx ? 'w-2 h-2 rounded-full bg-white/60' : 'w-2 h-2 rounded-full bg-white/15';
+  });
+}
+
+async function parseVideo() {
+  const input = document.getElementById('urlInput');
+  let text = input.value.trim();
+  if (!text) return showToast('Please enter a link', 'error');
+  const m = text.match(/https?:\/\/\S+|v\.douyin\.com\/\S+|vm\.tiktok\.com\/\S+|vt\.tiktok\.com\/\S+|t\.co\/\S+|b23\.tv\/\S+/i);
+  if (m) { text = m[0].replace(/[.,;:!?，。；：！？)]+$/, ''); }
+  if (!text.startsWith('http://') && !text.startsWith('https://')) { text = 'https://' + text; }
+  input.value = text; currentUrl = text;
+  document.getElementById('parseBtn').disabled = true;
+
+  animateToDroplet();
+
+  try {
+    const res = await fetch('/api/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: text }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Parse failed');
+    buildResult(data);
+    animateToResult();
+  } catch (e) {
+    gsap.to(dropletLayer, { opacity: 0, duration: 0.12, onComplete: () => dropletLayer.classList.add('hidden') });
+    gsap.to(card, { width: Math.min(680, window.innerWidth-32), minHeight: 200, borderRadius: '36px', padding: '36px 32px', duration: 0.65, ease: 'elastic.out(1,0.45)' });
+    inputLayer.classList.remove('hidden');
+    gsap.to(inputLayer, { opacity: 1, y: 0, duration: 0.2 });
+    document.getElementById('parseBtn').disabled = false;
+    showToast(e.message, 'error');
+  }
+}
+
+function buildResult(data) {
+  const qRow = document.getElementById('qualityRow'), tRow = document.getElementById('typeRow');
+  const vWrap = document.getElementById('videoWrap'), pWrap = document.getElementById('photoWrap'), pDots = document.getElementById('photoDots');
+
+  if (data.type === 'photo') {
+    currentContentType = 'photo'; currentImages = data.images || [];
+    vWrap.classList.add('hidden'); pWrap.classList.remove('hidden'); pDots.classList.remove('hidden');
+    document.getElementById('landscapeBtn').classList.add('hidden');
+    document.getElementById('saveImageBtn').classList.remove('hidden');
+    qRow.classList.add('hidden'); tRow.classList.add('hidden'); currentVideoUrl = '';
+    if (data.music_url) { tRow.classList.remove('hidden'); setType('video'); }
+    let ds = '';
+    currentImages.forEach((_, i) => { ds += `<button onclick="showPhoto(${i})" class="w-2 h-2 rounded-full ${i===0?'bg-white/60':'bg-white/15'}"></button>`; });
+    pDots.innerHTML = ds; showPhoto(0);
+    document.getElementById('platformTag').textContent = 'Douyin · Slides';
+  } else if (data.type === 'live_photo') {
+    // Live photo: show video + images
+    currentContentType = 'live_photo';
+    currentVideoUrl = data.video_url;
+    currentImages = data.images || [];
+    vWrap.classList.remove('hidden'); pWrap.classList.add('hidden'); pDots.classList.add('hidden');
+    qRow.classList.remove('hidden'); tRow.classList.remove('hidden');
+    document.getElementById('landscapeBtn').classList.remove('hidden');
+    document.getElementById('saveImageBtn').classList.add('hidden');
+    const p = document.getElementById('videoPlayer');
+    p.poster = data.thumbnail;
+    p.src = '/api/stream?video_url=' + encodeURIComponent(data.video_url) + '&quality=' + currentQuality;
+    p.load();
+    const platformNames = {tiktok:'TikTok',twitter:'X / Twitter',bilibili:'Bilibili',kuaishou:'快手'};
+    document.getElementById('platformTag').textContent = (platformNames[data.platform] || 'Douyin') + ' · Live Photo';
+    setQuality(currentQuality); setType('video');
+  } else {
+    currentContentType = 'video'; currentVideoUrl = data.video_url;
+    vWrap.classList.remove('hidden'); pWrap.classList.add('hidden'); pDots.classList.add('hidden');
+    qRow.classList.remove('hidden'); tRow.classList.remove('hidden');
+    document.getElementById('landscapeBtn').classList.remove('hidden');
+    document.getElementById('saveImageBtn').classList.add('hidden');
+    const p = document.getElementById('videoPlayer');
+    p.poster = data.thumbnail;
+    p.src = '/api/stream?video_url=' + encodeURIComponent(data.video_url) + '&quality=' + currentQuality;
+    p.load();
+    const platformNames = {tiktok:'TikTok',twitter:'X / Twitter',bilibili:'Bilibili',kuaishou:'快手'};
+    document.getElementById('platformTag').textContent = platformNames[data.platform] || 'Douyin';
+    setQuality(currentQuality); setType('video');
+  }
+  document.getElementById('videoTitle').textContent = data.title;
+  document.getElementById('downloadBtn').disabled = false;
+  document.getElementById('parseBtn').disabled = false;
+  updateLabel();
+}
+
+// ═══ Download ═══
+async function saveCurrentImage() {
+  if (!currentUrl) return;
+  const btn = document.getElementById('saveImageBtn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, type: 'image', image_index: currentPhotoIdx }) });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+    const blob = await res.blob();
+    let fn = 'image.webp';
+    const disp = res.headers.get('Content-Disposition') || '';
+    const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+    if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+  } catch (e) { showToast(e.message || 'Failed', 'error'); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+async function downloadCurrentPhoto() {
+  if (!currentUrl) return;
+  const btn = document.getElementById('downloadBtn'); btn.disabled = true;
+  document.getElementById('downloadText').textContent = 'Downloading...';
+  document.getElementById('downloadSpinner').classList.remove('hidden');
+  try {
+    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, type: currentType, image_index: currentPhotoIdx }) });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+    const blob = await res.blob();
+    let fn = 'image.webp';
+    const disp = res.headers.get('Content-Disposition') || '';
+    const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+    if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+  } catch (e) { showToast(e.message || 'Failed', 'error'); }
+  finally { btn.disabled = false; document.getElementById('downloadSpinner').classList.add('hidden'); document.getElementById('downloadText').textContent = 'Download Image'; }
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function downloadVideo() {
+  if (!currentUrl) return;
+  if (currentContentType === 'photo') return downloadCurrentPhoto();
+  const btn = document.getElementById('downloadBtn'); btn.disabled = true;
+  const textEl = document.getElementById('downloadText');
+  const spinner = document.getElementById('downloadSpinner');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressBar = document.getElementById('progressBar');
+  const progressText = document.getElementById('progressText');
+  textEl.textContent = 'Downloading...';
+  spinner.classList.remove('hidden');
+  progressWrap.classList.remove('hidden');
+  progressBar.style.width = '0%';
+  progressText.textContent = '';
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/download');
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.responseType = 'blob';
+
+  xhr.onprogress = function(e) {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      progressBar.style.width = pct + '%';
+      progressText.textContent = pct + '% · ' + formatSize(e.loaded) + ' / ' + formatSize(e.total);
+    } else if (e.loaded > 0) {
+      progressText.textContent = formatSize(e.loaded);
+    }
+  };
+
+  xhr.onload = function() {
+    if (xhr.status >= 400) {
+      try {
+        const err = JSON.parse(xhr.responseText);
+        showToast(err.detail || 'Download failed', 'error');
+      } catch { showToast('Download failed', 'error'); }
+      return;
+    }
+    let fn = 'video.mp4';
+    const disp = xhr.getResponseHeader('Content-Disposition') || '';
+    const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+    if (rfc) fn = decodeURIComponent(rfc[1]);
+    else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(xhr.response); a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+    progressBar.style.width = '100%';
+    progressText.textContent = 'Done!';
+    updateLabel();
+  };
+
+  xhr.onerror = function() { showToast('Network error', 'error'); };
+
+  xhr.onloadend = function() {
+    btn.disabled = false;
+    spinner.classList.add('hidden');
+    setTimeout(() => { progressWrap.classList.add('hidden'); }, 3000);
+  };
+
+  xhr.send(JSON.stringify({ url: currentUrl, quality: currentQuality, type: currentType }));
+}
+
+// ═══ Helpers ═══
+function showToast(msg, type) {
+  const c = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = `toast-widget text-xs px-4 py-3 rounded-[20px] ${type === 'error' ? 'text-red-300/80' : 'text-emerald-300/80'}`;
+  t.textContent = msg; c.appendChild(t);
+  gsap.fromTo(t, { opacity: 0, y: -12, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.35, ease: 'power3.out' });
+  setTimeout(() => {
+    gsap.to(t, { opacity: 0, y: -12, scale: 0.96, duration: 0.25, ease: 'power3.in', onComplete: () => t.remove() });
+  }, 2800);
+}
+
+document.getElementById('urlInput').addEventListener('keydown', e => { if (e.key === 'Enter') parseVideo(); });
+
+const vp = document.getElementById('videoPlayer');
+const lh = document.getElementById('loadingHint');
+vp.addEventListener('waiting', () => lh.classList.remove('hidden'));
+vp.addEventListener('playing', () => lh.classList.add('hidden'));
+
+vp.addEventListener('canplay', () => lh.classList.add('hidden'));
+
+// ═══ Version dropdown ═══
+document.addEventListener('click', e => {
+  const menu = document.getElementById('versionMenu');
+  const dropdown = document.getElementById('versionDropdown');
+  if (!menu.contains(e.target)) dropdown.classList.add('hidden');
+  else if (e.target.closest('button')) dropdown.classList.toggle('hidden');
+});
+
+// ─── Page load animation ───
+window.addEventListener('DOMContentLoaded', () => {
+  gsap.fromTo(card, { opacity: 0, y: 30, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: 'power3.out' });
+});
+</script>
+
+
+</body>
+</html>

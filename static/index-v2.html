@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Glass</title>
+
+<script src="/static/gsap.min.js?v=2"></script>
+<script src="/static/html2canvas.min.js?v=2"></script>
+<script src="/static/liquidGL.js?v=2"></script>
+
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    background: url('/static/bg.png?v=2') center / cover no-repeat fixed;
+    -webkit-font-smoothing: antialiased;
+  }
+  #cursorTrail {
+    position: fixed; inset: 0;
+    z-index: 9998;
+    pointer-events: none;
+  }
+  #cursorBall {
+    position: fixed; top: 0; left: 0;
+    width: 20px; height: 20px;
+    z-index: 9999;
+    pointer-events: none;
+    will-change: transform;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, rgba(255,255,255,0.25) 0%, transparent 50%, rgba(255,255,255,0.08) 100%);
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 0 18px rgba(255,255,255,0.1), 0 0 0 0.5px rgba(255,255,255,0.1) inset;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.05);
+    pointer-events: none; z-index: 0;
+  }
+
+  .panel-grid {
+    position: relative; z-index: 1;
+    width: 900px; max-width: calc(100vw - 72px);
+    min-height: calc(100vh - 40px);
+    margin: 0 auto;
+    padding: 20px 0;
+    display: flex; flex-direction: column;
+    gap: 24px;
+  }
+
+
+  /* ── Glass panels (liquidGL target) ── */
+  .glass {
+    border-radius: 22px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .g-top        { height: 72px; width: 1400px; position: absolute; left: calc(50% - 700px); z-index: 997; overflow: hidden; }
+
+  /* ── Panel 3: 视频预览 ── */
+  .panel3 {
+    position: fixed;
+    left: calc(50% - 336px); top: 100px;
+    z-index: 998;
+    width: 672px; height: 378px;
+    opacity: 0; pointer-events: none;
+    transform: scale(0);
+    transform-origin: center center;
+    overflow: hidden;
+    border-radius: 36px 36px 0 0;
+  }
+  .g-panel3-bg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    border-radius: 36px 36px 0 0;
+  }
+  .panel3-inner {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding: 16px 24px 0 24px;
+    pointer-events: auto;
+    overflow: hidden;
+  }
+  .preview-content {
+    flex: 1; width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    margin-bottom: 44px;
+  }
+  .preview-content video, .preview-content img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    border-radius: 18px;
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  /* 静音按钮 */
+  .mute-btn {
+    position: absolute; top: 12px; left: 16px; z-index: 30;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: none;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: rgba(255,255,255,0.7);
+    font-size: 12px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: auto;
+  }
+
+  /* 旋转按钮 */
+  .rotate-btn {
+    position: absolute; top: 12px; right: 16px; z-index: 30;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.7);
+    font-size: 20px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+    pointer-events: auto;
+  }
+  .rotate-btn:hover {
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+  }
+
+  /* 横屏旋转态：面板3 不变，视频旋转填满 */
+  .panel3.rotated .preview-content video,
+  .panel3.rotated .preview-content img {
+    transform: rotate(-90deg) scale(1.778);
+    transform-origin: center center;
+  }
+  .panel3.rotated .preview-content video {
+    pointer-events: none;
+  }
+
+  /* 自定义进度条 */
+  .custom-controls {
+    display: flex;
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    z-index: 30;
+    height: 44px;
+    border-radius: 0;
+    pointer-events: auto;
+    overflow: hidden;
+  }
+  .custom-controls-inner {
+    display: flex; align-items: center; justify-content: center; gap: 40px;
+    width: 100%; height: 100%;
+    padding: 0 14px;
+    position: relative; z-index: 2;
+  }
+  .cc-play {
+    width: 32px; height: 32px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 50%;
+    color: #fff; font-size: 14px;
+    cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: auto;
+    transition: all 0.2s;
+  }
+  .cc-play:hover {
+    background: rgba(255,255,255,0.15);
+    transform: scale(1.1);
+  }
+  /* ── Panel 4: 格式选择+下载 ── */
+  .panel4 {
+    position: fixed;
+    left: calc(50% - 360px); top: 530px;
+    z-index: 998;
+    width: 720px; height: 140px;
+    opacity: 0; pointer-events: none;
+    transform: scale(0);
+    transform-origin: center center;
+  }
+  .g-panel4-bg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    border-radius: 28px;
+  }
+  .panel4-inner {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; flex-direction: column;
+    align-items: center;
+    justify-content: center; gap: 14px;
+    padding: 16px 28px;
+    pointer-events: auto;
+  }
+  .panel4-title {
+    font-size: 13px; font-weight: 500;
+    color: rgba(255,255,255,0.5);
+    text-shadow: 0 0 8px rgba(0,0,0,0.5);
+    max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-align: center;
+  }
+  .panel4-expanded {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 16px;
+    width: 100%;
+  }
+
+  /* ── iOS 液体玻璃选择器 ── */
+  .ios-selector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 20px;
+    border-radius: 40px;
+    background: rgba(150, 200, 255, 0.06);
+    border: 1px solid rgba(150, 200, 255, 0.1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    position: relative;
+  }
+  .ios-indicator {
+    position: absolute;
+    height: calc(100% - 14px);
+    border-radius: 32px;
+    top: 7px; left: 7px;
+    pointer-events: none;
+    z-index: 0;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+  .ios-btn {
+    position: relative; z-index: 1;
+    height: 50px; padding: 0 24px;
+    border-radius: 22px;
+    font-size: 16px; min-width: auto;
+    background: transparent; border: none;
+    color: rgba(255,255,255,0.4);
+    font-family: inherit; font-weight: 500;
+    cursor: pointer;
+    text-shadow: 0 0 6px rgba(0,0,0,0.4);
+    transition: color 0.2s;
+  }
+  .ios-btn.active {
+    color: #ff8844;
+    font-weight: 600;
+  }
+  .ios-btn:hover { color: rgba(255,255,255,0.7); }
+  .ios-btn.btn-dim {
+    color: rgba(255,255,255,0.35);
+  }
+  .ios-btn.btn-dim:hover {
+    color: rgba(255,255,255,0.6);
+  }
+  /* 爱心按钮 */
+  .heart-btn {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: rgba(255,50,80,0.15);
+    border: 1px solid rgba(255,50,80,0.3);
+    color: #ff4466;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.3s;
+    pointer-events: auto;
+  }
+  .heart-btn:hover {
+    background: rgba(255,50,80,0.3);
+    transform: scale(1.1);
+  }
+
+  /* ── CSS glass controls ── */
+  .ctl-bar {
+    position: fixed;
+    left: calc(50% - 320px); top: calc(50% - 120px);
+    z-index: 999;
+    width: 640px; height: 240px;
+    transform-origin: center center;
+  }
+  .g-panel2 {
+    position: absolute; inset: 0;
+    width: 640px; height: 240px;
+    border-radius: 36px;
+  }
+  .ctl-inner {
+    position: absolute; inset: 0;
+    z-index: 2;
+    display: flex; flex-direction: column;
+    gap: 14px; align-items: center; justify-content: center;
+    padding: 24px 32px;
+  }
+  #ctlInputWrap {
+    width: 90%; height: 48px;
+    border-radius: 14px;
+  }
+  #ctlInputWrap input {
+    width: 100%; height: 100%; padding: 0 16px;
+    background: transparent; border: none;
+    color: #fff;
+    font-size: 14px; outline: none; font-family: inherit;
+    text-shadow: 0 0 8px rgba(0,0,0,0.5);
+  }
+  #ctlInputWrap input::placeholder { color: rgba(255,255,255,0.4); }
+  .ctl-btn {
+    height: 42px; border-radius: 12px; padding: 0 22px;
+    min-width: 90px;
+    color: #fff; font-size: 13px; font-weight: 600;
+    text-shadow: 0 0 8px rgba(0,0,0,0.5);
+    font-family: inherit;
+    display: flex; align-items: center; gap: 6px;
+    white-space: nowrap;
+  }
+  .ctl-btn.primary { border-color: rgba(100,150,255,0.3); color: #90b4ff; }
+
+  /* ── Fallback ── */
+  .glass.fallback-glass {
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    /* 恢复光标、隐藏鼠标特效 */
+    *, *::before, *::after { cursor: auto !important; }
+    #cursorTrail, #cursorBall { display: none !important; }
+
+    /* 背景不 fixed，避免滚动卡顿 */
+    body { background-attachment: scroll; }
+
+    /* 顶部面板 */
+    .g-top { width: 100vw; left: 0; height: 56px; border-radius: 0 0 18px 18px; }
+
+    /* 输入面板 */
+    .ctl-bar { width: 92vw; left: 4vw; top: calc(50vh - 110px); height: 200px; }
+    .g-panel2 { width: 100%; height: 100%; border-radius: 28px; }
+    .ctl-inner { padding: 16px 20px; gap: 10px; }
+    #ctlInputWrap { height: 42px; }
+    #ctlInputWrap input { font-size: 13px; }
+    .ctl-btn { height: 38px; font-size: 12px; padding: 0 16px; min-width: 80px; }
+
+    /* 视频预览面板 */
+    .panel3 { width: 94vw; left: 3vw; top: 60px; height: 56vw; border-radius: 24px 24px 0 0; }
+    .g-panel3-bg { border-radius: 24px 24px 0 0; }
+    .panel3-inner { padding: 10px 12px 0 12px; }
+    .preview-content { margin-bottom: 36px; }
+    .mute-btn { width: 28px; height: 28px; font-size: 14px; top: 8px; left: 10px; }
+    .rotate-btn { display: none; }
+    .custom-controls { height: 36px; }
+    .custom-controls-inner { gap: 20px; }
+    .cc-play { width: 28px; height: 28px; font-size: 12px; }
+
+    /* 格式选择面板 */
+    .panel4 { width: 92vw; left: 4vw; top: auto; bottom: 16px; height: auto; min-height: 100px; border-radius: 22px; }
+    .g-panel4-bg { border-radius: 22px; }
+    .panel4-inner { padding: 12px 16px; gap: 10px; }
+    .panel4-title { font-size: 12px; }
+    .heart-btn { width: 38px; height: 38px; font-size: 18px; }
+
+    /* iOS 选择器 */
+    .ios-selector { gap: 4px; padding: 5px 12px; border-radius: 28px; flex-wrap: wrap; }
+    .ios-btn { height: 36px; padding: 0 14px; font-size: 13px; border-radius: 18px; }
+    .panel4-expanded { gap: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="panel-grid" id="panelGrid">
+
+  <!-- ── Top panel ── -->
+  <div class="glass g-top"></div>
+  <!-- Version switch -->
+  <div id="versionMenu" style="position:fixed;top:16px;right:16px;z-index:9999;">
+    <button onclick="document.getElementById('versionDropdown').classList.toggle('hidden')" style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.15);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;cursor:pointer;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+    </button>
+    <div class="hidden" id="versionDropdown" style="position:absolute;right:0;top:44px;width:160px;padding:6px 0;border-radius:16px;background:rgba(0,0,0,0.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.15);box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+      <a href="/" style="display:block;padding:8px 16px;font-size:12px;color:rgba(255,255,255,0.6);text-decoration:none;transition:all 0.2s;" onmouseover="this.style.color='#fff';this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.color='rgba(255,255,255,0.6)';this.style.background='none'">🤍 Liquid Glass 3.0</a>
+      <a href="/v1" style="display:block;padding:8px 16px;font-size:12px;color:rgba(255,255,255,0.6);text-decoration:none;transition:all 0.2s;" onmouseover="this.style.color='#fff';this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.color='rgba(255,255,255,0.6)';this.style.background='none'">🖤 经典暗色版</a>
+      <a href="/v2" style="display:block;padding:8px 16px;font-size:12px;color:#fff;font-weight:500;background:rgba(255,255,255,0.1);text-decoration:none;">💎 WebGL 液态玻璃 ✓</a>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Panel 3: 视频预览（初始隐藏） ── -->
+<div class="panel3" id="panel3">
+  <div class="glass g-panel3-bg"></div>
+  <div class="panel3-inner">
+    <div class="preview-content" id="previewContent"></div>
+    <button class="mute-btn" id="muteBtn" title="静音">🔇</button>
+    <button class="rotate-btn" id="rotateBtn" title="旋转视频">↻</button>
+    <!-- 自定义进度条（旋转时替代原生控件） -->
+    <div class="glass custom-controls" id="customControls">
+      <div class="custom-controls-inner">
+        <button class="cc-play" id="ccPrev">◀</button>
+        <button class="cc-play" id="ccNext">▶</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Panel 4: 格式选择+下载（初始隐藏） ── -->
+<div class="panel4" id="panel4">
+  <div class="glass g-panel4-bg"></div>
+  <div class="panel4-inner" id="formatContent">
+    <!-- 第一行：标题（默认显示） -->
+    <div class="panel4-title" id="previewTitle"></div>
+    <!-- 初始状态：爱心按钮 -->
+    <button class="heart-btn" id="heartBtn">❤</button>
+    <!-- 展开状态：功能区（初始隐藏） -->
+    <div class="panel4-expanded" id="panel4Expanded" style="display:none;">
+      <!-- 面板5: 画质选择 -->
+      <div class="ios-selector" id="qualityPanel">
+        <div class="ios-indicator" id="qIndicator"></div>
+        <button class="ios-btn btn-dim" data-q="720p">720p</button>
+        <button class="ios-btn btn-dim" data-q="1080p">1080p</button>
+        <button class="ios-btn active" data-q="hd">HD</button>
+      </div>
+      <!-- 面板6: 格式选择 -->
+      <div class="ios-selector" id="formatPanel">
+        <div class="ios-indicator" id="fIndicator"></div>
+        <!-- 动态生成按钮 -->
+      </div>
+      <!-- 面板7: 操作按钮 -->
+      <div class="ios-selector" id="actionPanel">
+        <div class="ios-indicator" id="aIndicator"></div>
+        <button class="ios-btn btn-dim" data-act="download">Download</button>
+        <button class="ios-btn active" data-act="no">NO</button>
+        <button class="ios-btn btn-dim" data-act="reset">Reset</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ctl-bar" id="ctlBar">
+  <!-- 面板2：大玻璃底板 -->
+  <div class="glass g-panel2"></div>
+  <!-- 面板3：独立小玻璃控件 -->
+  <div class="ctl-inner">
+    <div class="glass g-panel3" id="ctlInputWrap">
+      <input type="text" id="urlInput" placeholder="Paste link..." />
+    </div>
+    <button class="glass g-panel3 ctl-btn primary" id="parseBtn">Paste &amp; Parse</button>
+  </div>
+</div>
+
+<canvas id="cursorTrail"></canvas>
+<div id="cursorBall"></div>
+<script>
+  // ── Cursor trail + main ball (desktop only) ──
+  (function() {
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) return;
+    const ball = document.getElementById('cursorBall');
+    const c = document.getElementById('cursorTrail');
+    const ctx = c.getContext('2d');
+    const N = 50;
+    const dots = Array.from({ length: N }, (_, i) => ({
+      x: 0, y: 0, r: 5, o: 0.3 * (1 - i / N),
+    }));
+    let mx = 0, my = 0;
+
+    function resize() { c.width = window.innerWidth; c.height = window.innerHeight; }
+    resize(); window.addEventListener('resize', resize);
+
+    window.addEventListener('mousemove', e => {
+      mx = e.clientX; my = e.clientY;
+      ball.style.transform = `translate(${mx - 10}px, ${my - 10}px)`;
+    }, { passive: true });
+
+    function drawGlassDot(x, y, r, alpha) {
+      // Glow
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, r * 2);
+      glow.addColorStop(0, `rgba(255,255,255,${alpha * 0.5})`);
+      glow.addColorStop(0.5, `rgba(255,255,255,${alpha * 0.1})`);
+      glow.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(x - r * 2, y - r * 2, r * 4, r * 4);
+      // Body
+      const bg = ctx.createRadialGradient(x - r * 0.25, y - r * 0.25, 0, x, y, r);
+      bg.addColorStop(0, `rgba(255,255,255,${alpha * 0.6})`);
+      bg.addColorStop(0.5, `rgba(255,255,255,${alpha * 0.05})`);
+      bg.addColorStop(1, `rgba(255,255,255,${alpha * 0.15})`);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = bg;
+      ctx.fill();
+      // Border
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.25})`;
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+
+    function draw() {
+      requestAnimationFrame(draw);
+      ctx.clearRect(0, 0, c.width, c.height);
+      dots[0].x += (mx - dots[0].x) * 0.8;
+      dots[0].y += (my - dots[0].y) * 0.8;
+      for (let i = 1; i < N; i++) {
+        const d = dots[i], p = dots[i - 1];
+        d.x += (p.x - d.x) * 0.45;
+        d.y += (p.y - d.y) * 0.45;
+      }
+      for (let i = N - 1; i >= 0; i--) {
+        drawGlassDot(dots[i].x, dots[i].y, dots[i].r, dots[i].o);
+      }
+    }
+    draw();
+  })();
+
+  // ═══ Version dropdown ═══
+  document.addEventListener('click', e => {
+    const menu = document.getElementById('versionMenu');
+    const dropdown = document.getElementById('versionDropdown');
+    if (!menu.contains(e.target)) dropdown.classList.add('hidden');
+    else if (e.target.closest('button')) dropdown.classList.toggle('hidden');
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+
+    // ── fixGlass ──
+    function fixGlass() {
+      document.querySelectorAll('.glass').forEach(el => {
+        if (el.classList.contains('ios-indicator')) return;
+        el.style.pointerEvents = 'auto';
+        el.style.opacity = '1';
+        el.querySelectorAll('canvas').forEach(c => { c.style.pointerEvents = 'none'; });
+      });
+    }
+
+    // ── liquidGL 初始化 ──
+    liquidGL({
+      snapshot: 'body', target: '.glass', resolution: 2.0,
+      refraction: 0.01, bevelDepth: 0.35, bevelWidth: 0.211, frost: 0.1,
+      shadow: true, specular: true, tilt: true, tiltFactor: 2, reveal: 'fade',
+      on: { init: fixGlass },
+    });
+    setTimeout(fixGlass, 500);
+
+
+    // ── DOM refs ──
+    const panel1 = document.querySelector('.g-top');
+    const panel2 = document.getElementById('ctlBar');
+    const panel3 = document.getElementById('panel3');
+    const panel4 = document.getElementById('panel4');
+    const previewContent = document.getElementById('previewContent');
+    const previewTitle = document.getElementById('previewTitle');
+    const rotateBtn = document.getElementById('rotateBtn');
+    const customControls = document.getElementById('customControls');
+    const muteBtn = document.getElementById('muteBtn');
+    const heartBtn = document.getElementById('heartBtn');
+    const panel4Expanded = document.getElementById('panel4Expanded');
+    const qualityPanel = document.getElementById('qualityPanel');
+    const formatPanel = document.getElementById('formatPanel');
+    const actionPanel = document.getElementById('actionPanel');
+    const qIndicator = document.getElementById('qIndicator');
+    const fIndicator = document.getElementById('fIndicator');
+    const aIndicator = document.getElementById('aIndicator');
+    const ccPrev = document.getElementById('ccPrev');
+    const ccNext = document.getElementById('ccNext');
+    const ctlInner = document.querySelector('.ctl-inner');
+    const panel3Inner = document.querySelector('.panel3-inner');
+    const urlInput = document.getElementById('urlInput');
+    const parseBtn = document.getElementById('parseBtn');
+    const resetBtn = actionPanel.querySelector('[data-act="reset"]');
+    let isMuted = true, lastInfo = null, currentFmt = 'video', parsing = false, selectedPhotoIndex = 0, currentImages = [];
+
+    // ── Shader 驱动 ──
+    const renderer = window.__liquidGLRenderer__;
+    const lensCache = {};
+    const findLens = (el) => {
+      if (!renderer || !renderer.lenses) return null;
+      if (lensCache[el.id]) return lensCache[el.id];
+      const found = renderer.lenses.find(l => l.el === el || l.el?.contains?.(el) || el?.contains?.(l.el));
+      if (found && el.id) lensCache[el.id] = found;
+      return found;
+    };
+
+    // lens 动画辅助：refraction + revealProgress 联动
+    const tweenLens = (tl, lens, from, to, dur, ease, pos) => {
+      if (!lens) return;
+      const p = { ...from };
+      tl.to(p, { ...to, duration: dur, ease, onUpdate: () => {
+        lens._revealProgress = p.rp; lens.options.refraction = p.ref;
+      }}, pos);
+    };
+
+    // ── Keep controls alive ──
+    const keepAliveEls = [ctlInner, panel3Inner, qualityPanel, formatPanel, actionPanel];
+    setInterval(() => {
+      keepAliveEls.forEach(el => {
+        if (el && el.style.opacity !== '1') el.style.opacity = '1';
+        if (el && el.style.pointerEvents !== 'auto') el.style.pointerEvents = 'auto';
+      });
+    }, 500);
+
+    // ── 播放/暂停切换 ──
+    const togglePlay = () => {
+      const video = previewContent.querySelector('video');
+      if (!video) return;
+      if (video.paused) { video.play(); ccNext.textContent = '❚❚'; }
+      else { video.pause(); ccNext.textContent = '▶'; }
+    };
+
+    // ── 图片导航 ──
+    const navigateImage = (direction, animate = true) => {
+      if (currentImages.length === 0) return;
+      const newIndex = (selectedPhotoIndex + direction + currentImages.length) % currentImages.length;
+      switchToImage(newIndex, animate);
+    };
+
+    const switchToImage = (idx, animate = true) => {
+      if (idx === selectedPhotoIndex || idx < 0 || idx >= currentImages.length) return;
+      selectedPhotoIndex = idx;
+      const img = previewContent.querySelector('img');
+      if (img) {
+        if (animate) {
+          gsap.to(img, {
+            opacity: 0, x: -20, duration: 0.15, ease: 'power2.in',
+            onComplete: () => {
+              img.src = currentImages[selectedPhotoIndex];
+              gsap.fromTo(img,
+                { opacity: 0, x: 20 },
+                { opacity: 1, x: 0, duration: 0.2, ease: 'power2.out' }
+              );
+            }
+          });
+        } else {
+          img.src = currentImages[selectedPhotoIndex];
+        }
+      }
+      // 更新面板5按钮状态
+      qualityPanel.querySelectorAll('.ios-btn').forEach(b => {
+        b.classList.remove('active');
+        b.classList.add('btn-dim');
+      });
+      const activeBtn = qualityPanel.querySelector(`[data-idx="${selectedPhotoIndex}"]`);
+      if (activeBtn) {
+        activeBtn.classList.remove('btn-dim');
+        activeBtn.classList.add('active');
+        moveIndicator(qualityPanel.querySelector('.ios-indicator'), activeBtn);
+      }
+    };
+
+    // ── iOS 选择器指示器移动 ──
+    const moveIndicator = (indicator, btn) => {
+      if (!indicator || !btn) return;
+      const rowRect = indicator.parentElement.getBoundingClientRect();
+      const btnRect = btn.getBoundingClientRect();
+      gsap.to(indicator, {
+        left: (btnRect.left - rowRect.left) + 'px',
+        width: btnRect.width + 'px',
+        duration: 0.35,
+        ease: 'elastic.out(1, 0.5)'
+      });
+    };
+
+    // ── 切换选中按钮 ──
+    const activateBtn = (row, btn, indicator) => {
+      row.querySelectorAll('.ios-btn').forEach(b => {
+        b.classList.remove('active');
+        b.classList.add('btn-dim');
+      });
+      btn.classList.remove('btn-dim');
+      btn.classList.add('active');
+      moveIndicator(indicator, btn);
+    };
+
+    // ── 事件绑定 ──
+    muteBtn.addEventListener('click', () => {
+      const video = previewContent.querySelector('video');
+      isMuted = !isMuted;
+      if (video) video.muted = isMuted;
+      muteBtn.textContent = isMuted ? '🔇' : '🔊';
+    });
+    rotateBtn.addEventListener('click', () => panel3.classList.toggle('rotated'));
+    ccPrev.addEventListener('click', () => {
+      if (currentImages.length > 0) {
+        navigateImage(-1); // 上一张
+      }
+    });
+    ccNext.addEventListener('click', () => {
+      if (currentImages.length > 0) {
+        navigateImage(1); // 下一张
+      } else {
+        togglePlay();
+      }
+    });
+    // ── 面板7: 操作按钮 ──
+    actionPanel.addEventListener('click', (e) => {
+      const btn = e.target.closest('.ios-btn[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      activateBtn(actionPanel, btn, aIndicator);
+      if (act === 'no') return;
+      if (act === 'reset') {
+        setTimeout(() => location.reload(), 380);
+        return;
+      } else if (act === 'download') {
+        if (!lastInfo) return;
+        const activeQ = qualityPanel.querySelector('.ios-btn.active');
+        const quality = activeQ ? activeQ.dataset.q : 'hd';
+        const url = lastInfo.video_url || urlInput.value.trim();
+        if (currentFmt === 'video') {
+          const m3u8 = lastInfo.m3u8_url ? `&m3u8_url=${encodeURIComponent(lastInfo.m3u8_url)}` : '';
+          const u = `/api/stream?video_url=${encodeURIComponent(url)}&quality=${quality}${m3u8}`;
+          Object.assign(document.createElement('a'), { href: u, download: '' }).click();
+        } else if (currentFmt === 'allImage') {
+          const images = lastInfo.images || [];
+          images.forEach((img, i) => {
+            fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: urlInput.value.trim(), quality, type: 'photo', image_index: i }) })
+              .then(r => r.blob()).then(b => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(b);
+                a.download = (lastInfo.title || 'image') + '_' + (i + 1) + '.jpg';
+                a.click();
+              });
+          });
+        } else if (currentFmt === 'thisImage') {
+          fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: urlInput.value.trim(), quality, type: 'photo', image_index: selectedPhotoIndex }) })
+            .then(r => r.blob()).then(b => {
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(b);
+              a.download = (lastInfo.title || 'image') + '_' + (selectedPhotoIndex + 1) + '.jpg';
+              a.click();
+            });
+        } else if (currentFmt === 'slideshow') {
+          fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: urlInput.value.trim(), quality, type: 'slideshow', image_index: 0 }) })
+            .then(r => r.blob()).then(b => {
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(b);
+              a.download = (lastInfo.title || 'slideshow') + '.mp4';
+              a.click();
+            });
+        } else if (currentFmt === 'mp3') {
+          fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: urlInput.value.trim(), quality, type: 'mp3', image_index: 0 }) })
+            .then(r => r.blob()).then(b => {
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(b);
+              a.download = (lastInfo.title || 'audio') + '.mp3';
+              a.click();
+            });
+        }
+      }
+    });
+
+    // ── 面板5: 画质/图片选择 ──
+    qualityPanel.addEventListener('click', (e) => {
+      const btn = e.target.closest('.ios-btn');
+      if (!btn) return;
+      const indicator = qualityPanel.querySelector('.ios-indicator');
+      activateBtn(qualityPanel, btn, indicator);
+      if (btn.dataset.idx !== undefined) {
+        selectedPhotoIndex = parseInt(btn.dataset.idx);
+        // 切换预览图
+        if (currentImages.length > 0) {
+          const img = previewContent.querySelector('img');
+          if (img) img.src = currentImages[selectedPhotoIndex];
+        }
+      }
+    });
+
+    // ── 面板6: 格式选择（动态按钮） ──
+    formatPanel.addEventListener('click', (e) => {
+      const btn = e.target.closest('.ios-btn[data-fmt]');
+      if (!btn) return;
+      const indicator = formatPanel.querySelector('.ios-indicator');
+      activateBtn(formatPanel, btn, indicator);
+      currentFmt = btn.dataset.fmt;
+    });
+
+    // ── 解析按钮 ──
+    parseBtn.addEventListener('click', async () => {
+      if (parsing) return;
+      urlInput.value = '';
+      let url = '';
+      try {
+        const clip = await navigator.clipboard.readText();
+        if (clip && clip.trim()) { url = clip.trim(); urlInput.value = url; }
+      } catch (e) {}
+      if (!url) return;
+      parsing = true;
+      parseBtn.textContent = '...';
+      try {
+        const res = await fetch('/api/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+        const data = await res.json();
+        if (data.success) { lastInfo = data; showResult(data); }
+        else { alert(data.detail || '解析失败'); }
+      } catch (err) { alert('请求失败: ' + err.message); }
+      parsing = false;
+      parseBtn.textContent = 'Paste & Parse';
+    });
+
+    // ── 爱心按钮：第三次页面切换 ──
+    let heartExpanded = false;
+    heartBtn.addEventListener('click', () => {
+      if (heartExpanded) return;
+      heartExpanded = true;
+      const tl = gsap.timeline();
+      const isMob = window.innerWidth <= 768;
+      const vw = window.innerWidth, vh = window.innerHeight;
+
+      // 1. 爱心消失
+      tl.to(heartBtn, { scale: 0, opacity: 0, duration: 0.2, ease: 'power2.in',
+        onComplete: () => { heartBtn.style.display = 'none'; }
+      });
+
+      // 2. 面板1 铺满
+      const l1 = findLens(panel1);
+      if (l1) { l1._revealProgress = 0.5; l1.options.refraction = 0.08; }
+      if (isMob) {
+        tl.to(panel1, { height: String(vh * 0.95) + 'px', width: '100vw', left: '0', borderRadius: '12px', duration: 0.8, ease: 'elastic.out(1, 0.6)' });
+      } else {
+        tl.to(panel1, { height: '1069px', width: '1900px', left: 'calc(50% - 950px)', borderRadius: '12px', duration: 0.8, ease: 'elastic.out(1, 0.6)' });
+      }
+      tweenLens(tl, l1, { rp: 0.5, ref: 0.08 }, { rp: 1, ref: 0.01 }, 0.8, 'elastic.out(1, 0.6)', '-=0.8');
+
+      // 3. 面板3 坍缩
+      const l3 = findLens(panel3);
+      tl.to(panel3, { scale: 0.05, borderRadius: '50%', opacity: 0.3, duration: 0.4, ease: 'power3.in' });
+      tweenLens(tl, l3, { rp: 1, ref: 0.01 }, { rp: 0, ref: 0.15 }, 0.4, 'power3.in', '<');
+
+      // 4. 面板3 移到左上角
+      tl.to(panel3, { left: isMob ? '3vw' : '20px', top: isMob ? '16px' : '20px', duration: 0.01 });
+
+      // 5. 面板3 展开
+      if (l3) { l3._revealProgress = 0; l3.options.refraction = 0.15; }
+      if (isMob) {
+        tl.to(panel3, { scale: 1, borderRadius: '20px 20px 0 0', opacity: 1, width: String(vw * 0.85) + 'px', height: String(vw * 0.48) + 'px', duration: 0.8, ease: 'elastic.out(1, 0.5)' });
+      } else {
+        tl.to(panel3, { scale: 1, borderRadius: '36px 36px 0 0', opacity: 1, width: '470px', height: '265px', duration: 0.8, ease: 'elastic.out(1, 0.5)' });
+      }
+      tweenLens(tl, l3, { rp: 0, ref: 0.15 }, { rp: 1, ref: 0.01 }, 0.8, 'elastic.out(1, 0.5)', '-=0.8');
+
+      // 6. 面板4 伸展
+      const l4 = findLens(panel4);
+      if (l4) { l4._revealProgress = 0; l4.options.refraction = 0.1; }
+      if (isMob) {
+        tl.to(panel4, { height: 'auto', width: '92vw', left: '4vw', top: 'auto', bottom: '16px', duration: 0.8, ease: 'elastic.out(1, 0.6)' }, '-=0.4');
+      } else {
+        tl.to(panel4, { height: '405px', width: '720px', left: 'calc(50% - 360px)', top: 'calc(50% - 202px)', duration: 0.8, ease: 'elastic.out(1, 0.6)' }, '-=0.4');
+      }
+      tweenLens(tl, l4, { rp: 0, ref: 0.1 }, { rp: 1, ref: 0.01 }, 0.8, 'elastic.out(1, 0.6)', '-=0.8');
+
+      // 7. 显示功能区
+      tl.call(() => {
+        panel4Expanded.style.display = 'flex';
+        gsap.from(panel4Expanded.querySelectorAll('.ios-selector'), {
+          opacity: 0, y: 20, duration: 0.4, stagger: 0.12, ease: 'power2.out',
+          onComplete: () => {
+            fixGlass();
+            // 定位指示器
+            const hdBtn = qualityPanel.querySelector('.active');
+            const fmtBtn = formatPanel.querySelector('.active');
+            const noBtn = actionPanel.querySelector('.active');
+            if (hdBtn) moveIndicator(qualityPanel.querySelector('.ios-indicator'), hdBtn);
+            if (fmtBtn) moveIndicator(formatPanel.querySelector('.ios-indicator'), fmtBtn);
+            if (noBtn) moveIndicator(aIndicator, noBtn);
+          }
+        });
+      }, null, '-=0.3');
+    });
+
+    // ── showResult ──
+    function showResult(info) {
+      // 视频/图片预览
+      currentImages = [];
+      if (info.video_url) {
+        const m3u8 = info.m3u8_url ? `&m3u8_url=${encodeURIComponent(info.m3u8_url)}` : '';
+        const vUrl = `/api/stream?video_url=${encodeURIComponent(info.video_url)}&quality=1080p${m3u8}`;
+        const video = document.createElement('video');
+        video.src = vUrl; video.autoplay = true; video.loop = true; video.muted = true;
+        video.playsInline = true; video.style.cssText = 'max-width:100%;max-height:100%;border-radius:18px;cursor:pointer;';
+        video.addEventListener('click', togglePlay);
+        previewContent.innerHTML = ''; previewContent.appendChild(video);
+        customControls.style.display = 'flex';
+        video.addEventListener('play', () => { ccNext.textContent = '❚❚'; });
+        video.addEventListener('pause', () => { ccNext.textContent = '▶'; });
+        isMuted = true; muteBtn.textContent = '🔇';
+      } else if (info.thumbnail) {
+        currentImages = info.images || [];
+        if (currentImages.length > 0) {
+          previewContent.innerHTML = `<img src="${currentImages[0]}" style="max-width:100%;max-height:100%;border-radius:18px;object-fit:contain;" />`;
+        } else {
+          previewContent.innerHTML = `<img src="${info.thumbnail}" style="max-width:100%;max-height:100%;border-radius:18px;object-fit:contain;" />`;
+        }
+        // 图片导航条
+        customControls.style.display = 'flex';
+      }
+      previewTitle.textContent = info.title || '';
+
+      // 面板5: 视频→画质选择，图片→图片选择
+      const isVideo = info.type === 'video';
+      const images = info.images || [];
+      qualityPanel.innerHTML = '<div class="ios-indicator" id="qIndicator"></div>';
+      if (isVideo) {
+        qualityPanel.style.display = '';
+        [{q: '720p', text: '720p'}, {q: '1080p', text: '1080p'}, {q: 'hd', text: 'HD'}].forEach(item => {
+          const btn = document.createElement('button');
+          btn.className = 'ios-btn' + (item.q === 'hd' ? ' active' : ' btn-dim');
+          btn.dataset.q = item.q;
+          btn.textContent = item.text;
+          qualityPanel.appendChild(btn);
+        });
+        setTimeout(() => moveIndicator(document.getElementById('qIndicator'), qualityPanel.querySelector('.active')), 500);
+      } else if (images.length > 0) {
+        qualityPanel.style.display = '';
+        selectedPhotoIndex = 0;
+        images.forEach((_, i) => {
+          const btn = document.createElement('button');
+          btn.className = 'ios-btn' + (i === 0 ? ' active' : ' btn-dim');
+          btn.dataset.idx = i;
+          btn.textContent = String(i + 1);
+          qualityPanel.appendChild(btn);
+        });
+        const newQIndicator = document.getElementById('qIndicator');
+        setTimeout(() => moveIndicator(newQIndicator, qualityPanel.querySelector('.active')), 500);
+      } else {
+        qualityPanel.style.display = 'none';
+      }
+
+      // 面板6: 根据类型生成格式按钮
+      formatPanel.innerHTML = '<div class="ios-indicator" id="fIndicator"></div>';
+      const fmtBtns = isVideo
+        ? [{fmt: 'video', text: 'Video'}, {fmt: 'mp3', text: 'MP3'}, {fmt: 'no', text: 'NO'}, {fmt: 'slideshow', text: 'Slideshow'}]
+        : [{fmt: 'allImage', text: 'all Image'}, {fmt: 'no', text: 'NO'}, {fmt: 'thisImage', text: 'this Image'}, {fmt: 'slideshow', text: 'Slideshow'}];
+      const defaultFmt = 'no';
+      fmtBtns.forEach((item, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'ios-btn' + (item.fmt === defaultFmt ? ' active' : ' btn-dim');
+        btn.dataset.fmt = item.fmt;
+        btn.textContent = item.text;
+        formatPanel.appendChild(btn);
+      });
+      currentFmt = defaultFmt;
+      const newFIndicator = document.getElementById('fIndicator');
+      setTimeout(() => moveIndicator(newFIndicator, formatPanel.querySelector('.active')), 500);
+
+      // 面板7: 重置默认状态
+      actionPanel.querySelectorAll('.ios-btn').forEach(b => { b.classList.remove('active'); b.classList.add('btn-dim'); });
+      const noBtn = actionPanel.querySelector('[data-act="no"]');
+      if (noBtn) { noBtn.classList.remove('btn-dim'); noBtn.classList.add('active'); }
+      setTimeout(() => moveIndicator(aIndicator, noBtn), 500);
+
+      // 重置状态
+      panel3.classList.remove('rotated');
+      heartExpanded = false;
+      heartBtn.style.display = 'flex';
+      gsap.set(heartBtn, { scale: 1, opacity: 1 });
+      panel4Expanded.style.display = 'none';
+
+      const isMob = window.innerWidth <= 768;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      if (isMob) {
+        gsap.set(panel4, { height: 'auto', width: '92vw', left: '4vw', top: 'auto', bottom: '16px' });
+        gsap.set(panel3, { width: '94vw', height: '56vw', left: '3vw', top: '60px', scale: 1, borderRadius: '24px 24px 0 0', opacity: 0, transformOrigin: 'center center' });
+        gsap.set(panel1, { height: '56px', width: '100vw', left: '0', borderRadius: '0 0 18px 18px' });
+      } else {
+        gsap.set(panel4, { height: '140px', width: '720px', left: 'calc(50% - 360px)', top: '530px', bottom: 'auto' });
+        gsap.set(panel3, { width: '672px', height: '378px', left: 'calc(50% - 336px)', top: '100px', scale: 1, borderRadius: '36px 36px 0 0', opacity: 0, transformOrigin: 'center center' });
+        gsap.set(panel1, { height: '72px', width: '1400px', left: 'calc(50% - 700px)', borderRadius: '22px' });
+      }
+
+      const tl = gsap.timeline();
+
+      // Phase 1: 面板2 坍缩
+      tl.to(ctlInner, { opacity: 0, duration: 0.2, ease: 'power2.in' });
+      tl.to(panel2, { scale: 0.05, borderRadius: '50%', duration: 0.5, ease: 'power3.in', onComplete: () => { panel2.style.display = 'none'; } }, '<');
+      tweenLens(tl, findLens(panel2), { rp: 1, ref: 0.01 }, { rp: 0, ref: 0.15 }, 0.5, 'power2.in', '<');
+
+      // Phase 2: 面板1 伸展
+      const l1 = findLens(panel1);
+      if (l1) { l1._revealProgress = 0.5; l1.options.refraction = 0.08; }
+      if (isMob) {
+        tl.to(panel1, { height: String(vh * 0.95) + 'px', width: '100vw', left: '0', duration: 1, ease: 'elastic.out(1, 0.6)' });
+      } else {
+        tl.to(panel1, { height: '972px', width: '1728px', left: 'calc(50% - 864px)', duration: 1, ease: 'elastic.out(1, 0.6)' });
+      }
+      tweenLens(tl, l1, { rp: 0.5, ref: 0.08 }, { rp: 1, ref: 0.01 }, 1, 'elastic.out(1, 0.6)', '-=1');
+
+      // Phase 3: 面板3 展开
+      const l3 = findLens(panel3);
+      tl.set(panel3, { display: 'block', opacity: 0, scale: 0.05, borderRadius: '50%' }, '-=0.6');
+      if (l3) { l3._revealProgress = 0; l3.options.refraction = 0.15; }
+      if (isMob) {
+        tl.to(panel3, { scale: 1, borderRadius: '24px', opacity: 1, duration: 0.8, ease: 'elastic.out(1, 0.5)', onStart: () => { panel3.style.pointerEvents = 'auto'; } }, '-=0.6');
+      } else {
+        tl.to(panel3, { scale: 1, borderRadius: '36px', opacity: 1, duration: 0.8, ease: 'elastic.out(1, 0.5)', onStart: () => { panel3.style.pointerEvents = 'auto'; } }, '-=0.6');
+      }
+      tweenLens(tl, l3, { rp: 0, ref: 0.15 }, { rp: 1, ref: 0.01 }, 0.8, 'elastic.out(1, 0.5)', '-=0.8');
+
+      // Phase 4: 面板4 展开
+      const l4 = findLens(panel4);
+      tl.set(panel4, { display: 'block', opacity: 0, scale: 0.05, borderRadius: '50%' }, '-=0.45');
+      if (l4) { l4._revealProgress = 0; l4.options.refraction = 0.1; }
+      if (isMob) {
+        tl.to(panel4, { scale: 1, borderRadius: '22px', opacity: 1, duration: 0.7, ease: 'elastic.out(1, 0.5)', onStart: () => { panel4.style.pointerEvents = 'auto'; } }, '-=0.45');
+      } else {
+        tl.to(panel4, { scale: 1, borderRadius: '28px', opacity: 1, duration: 0.7, ease: 'elastic.out(1, 0.5)', onStart: () => { panel4.style.pointerEvents = 'auto'; } }, '-=0.45');
+      }
+      tweenLens(tl, l4, { rp: 0, ref: 0.1 }, { rp: 1, ref: 0.01 }, 0.7, 'elastic.out(1, 0.5)', '-=0.7');
+
+      // 修复 glass
+      tl.call(() => {
+        fixGlass();
+        try { liquidGL.registerDynamic('.panel3 .glass'); } catch(e) {}
+      }, null, '+=0.3');
+    }
+
+  });
+</script>
+
+</body>
+</html>
