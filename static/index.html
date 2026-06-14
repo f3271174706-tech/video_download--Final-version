@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>视频下载器</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="/static/tailwindcss.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <style>
 /* Ensure interactive elements are clickable */
@@ -505,6 +505,27 @@ video::-webkit-media-controls-enclosure {
 ::-webkit-scrollbar { width: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
+
+/* ─── Loading label shimmer (GSAP-driven) ─── */
+.loading-text-shimmer {
+  background: linear-gradient(90deg,
+    rgba(80,80,80,0.6) 0%,
+    rgba(80,80,80,0.6) 20%,
+    rgba(180,220,255,1) 35%,
+    #fff 46%,
+    #fff 50%,
+    rgba(230,180,255,1) 54%,
+    rgba(255,200,230,1) 58%,
+    rgba(160,230,255,1) 65%,
+    rgba(80,80,80,0.6) 80%,
+    rgba(80,80,80,0.6) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-position: 100% center;
+}
 </style>
 </head>
 <body>
@@ -601,6 +622,10 @@ video::-webkit-media-controls-enclosure {
           <div class="w-1.5 h-1.5 rounded-full bg-black/25"></div>
           <div class="w-1.5 h-1.5 rounded-full bg-black/25"></div>
           <div class="w-1.5 h-1.5 rounded-full bg-black/25"></div>
+        </div>
+        <div id="loadingLabel" class="hidden items-center gap-2 text-xs tracking-widest uppercase" style="color:rgba(0,0,0,0.35);font-weight:500;">
+          <span id="loadingLabelIcon"></span>
+          <span id="loadingLabelText">Loading</span>
         </div>
       </div>
 
@@ -773,7 +798,9 @@ function startLoadingAnim() {
 }
 function stopLoadingAnim() {
   if (loadingTl) { loadingTl.kill(); loadingTl = null; }
-  gsap.set(['#ringOuter', '#ringInner', '#centerDot', '#loadingDots div'], { clearProps: 'all' });
+  gsap.set(['#ringOuter', '#ringInner', '#centerDot', '#loadingDots div', '#loadingLabel'], { clearProps: 'all' });
+  const label = document.getElementById('loadingLabel');
+  if (label) label.classList.add('hidden');
 }
 
 // ═══ GSAP: Input → Droplet ═══
@@ -1005,6 +1032,94 @@ function showLivePhoto(idx) {
   });
 }
 
+async function showLoadingLabel(type, count) {
+  const label = document.getElementById('loadingLabel');
+  const iconEl = document.getElementById('loadingLabelIcon');
+  const textEl = document.getElementById('loadingLabelText');
+  if (!label || !iconEl || !textEl) return;
+
+  let svgHtml = '';
+  let labelText = '';
+  if (type === 'live_photo') {
+    labelText = count > 1 ? 'Live Photos' : 'Live Photo';
+    svgHtml = '<svg width="28" height="28" viewBox="0 0 28 28"><circle class="lp-inner" cx="14" cy="14" r="4" fill="none" stroke="rgba(0,0,0,0.25)" stroke-width="1.2"/><circle class="lp-mid" cx="14" cy="14" r="9" fill="none" stroke="rgba(0,0,0,0.2)" stroke-width="1.2"/><circle class="lp-outer" cx="14" cy="14" r="14" fill="none" stroke="rgba(0,0,0,0.15)" stroke-width="1.2" stroke-dasharray="3 3"/></svg>';
+  } else if (type === 'video') {
+    labelText = 'Video';
+    svgHtml = '<svg width="24" height="24" viewBox="0 0 24 24"><polygon class="vid-icon" points="8,5 20,12 8,19" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+  } else {
+    labelText = count > 1 ? count + ' Photos' : 'Photo';
+    svgHtml = '<svg width="24" height="24" viewBox="0 0 24 24"><rect class="img-back" x="3" y="5" width="16" height="14" rx="2" fill="none" stroke="rgba(0,0,0,0.15)" stroke-width="1.2"/><rect class="img-front" x="6" y="3" width="16" height="14" rx="2" fill="none" stroke="rgba(0,0,0,0.25)" stroke-width="1.2"/><circle class="img-dot" cx="12" cy="10" r="2.5" fill="none" stroke="rgba(0,0,0,0.2)" stroke-width="1.2"/></svg>';
+  }
+
+  iconEl.innerHTML = svgHtml;
+  textEl.textContent = labelText;
+  textEl.classList.add('loading-text-shimmer');
+  label.classList.remove('hidden');
+  label.style.display = 'flex';
+
+  const tl = gsap.timeline();
+  let extraTween = null;
+
+  // Shimmer: text gradient sweep + icon glow
+  const shimmerTl = gsap.timeline({ repeat: -1 });
+  shimmerTl.fromTo(textEl,
+    { backgroundPosition: '100% center' },
+    { backgroundPosition: '-100% center', duration: 1.6, ease: 'power1.inOut' }
+  );
+  shimmerTl.to(textEl, { backgroundPosition: '100% center', duration: 0, ease: 'none' });
+  shimmerTl.fromTo(iconEl.querySelector('svg'),
+    { filter: 'drop-shadow(0 0 0px transparent)' },
+    { filter: 'drop-shadow(0 0 8px rgba(180,160,255,1)) drop-shadow(0 0 16px rgba(140,200,255,0.7))', duration: 0.6, ease: 'power2.in' },
+    0.4
+  );
+  shimmerTl.to(iconEl.querySelector('svg'),
+    { filter: 'drop-shadow(0 0 0px transparent)', duration: 0.5, ease: 'power2.out' },
+    1.0
+  );
+
+  if (type === 'live_photo') {
+    const inner = iconEl.querySelector('.lp-inner');
+    const middle = iconEl.querySelector('.lp-mid');
+    const outer = iconEl.querySelector('.lp-outer');
+    gsap.set(outer, { transformOrigin: '14px 14px' });
+    extraTween = gsap.to(outer, { rotation: 360, duration: 2.5, ease: 'none', repeat: -1 });
+    tl.fromTo(inner, { scale: 0.5, opacity: 0, transformOrigin: '14px 14px' }, { scale: 1, opacity: 1, duration: 0.4, ease: 'back.out(2)' }, 0);
+    tl.fromTo(middle, { scale: 0.5, opacity: 0, transformOrigin: '14px 14px' }, { scale: 1, opacity: 1, duration: 0.5, ease: 'back.out(2)' }, 0.1);
+    tl.fromTo(outer, { opacity: 0 }, { opacity: 1, duration: 0.4 }, 0.15);
+    tl.to([inner, middle], { scale: 1.15, opacity: 0.6, duration: 0.4, ease: 'power2.inOut', yoyo: true, repeat: 2 }, 0.6);
+  } else if (type === 'video') {
+    const poly = iconEl.querySelector('.vid-icon');
+    tl.fromTo(poly, { scale: 0.3, opacity: 0, transformOrigin: 'center center' }, { scale: 1.2, opacity: 1, duration: 0.35, ease: 'back.out(3)' }, 0);
+    tl.to(poly, { scale: 1, duration: 0.25, ease: 'power2.inOut' }, 0.35);
+    tl.to(poly, { scale: 1.15, opacity: 0.6, duration: 0.35, ease: 'power2.inOut', yoyo: true, repeat: 2 }, 0.6);
+  } else {
+    const back = iconEl.querySelector('.img-back');
+    const front = iconEl.querySelector('.img-front');
+    const dot = iconEl.querySelector('.img-dot');
+    tl.fromTo(back, { x: -8, opacity: 0 }, { x: 0, opacity: 1, duration: 0.35, ease: 'power3.out' }, 0);
+    tl.fromTo(front, { x: 8, opacity: 0 }, { x: 0, opacity: 1, duration: 0.4, ease: 'power3.out' }, 0.1);
+    tl.fromTo(dot, { scale: 0, opacity: 0, transformOrigin: 'center center' }, { scale: 1, opacity: 1, duration: 0.3, ease: 'back.out(3)' }, 0.25);
+    tl.to([back, front, dot], { scale: 1.1, opacity: 0.6, duration: 0.35, ease: 'power2.inOut', yoyo: true, repeat: 2 }, 0.6);
+  }
+
+  tl.fromTo(label, { y: 4, opacity: 0 }, { y: -8, opacity: 0.6, duration: 0.35, ease: 'power2.out' }, 0);
+  tl.to(label, { y: 0, opacity: 0.35, duration: 0.3, ease: 'power2.inOut' }, 0.35);
+  tl.to(label, { y: -6, opacity: 0.6, duration: 0.3, ease: 'power2.out' }, 0.65);
+  tl.to(label, { y: 0, opacity: 0.35, duration: 0.25, ease: 'power2.inOut' }, 0.95);
+  tl.to(label, { y: -4, opacity: 0.5, duration: 0.25, ease: 'power2.out' }, 1.2);
+  tl.to(label, { y: 0, opacity: 0, duration: 0.3, ease: 'power2.in' }, 1.45);
+
+  await tl;
+  if (extraTween) extraTween.kill();
+  shimmerTl.kill();
+  tl.kill();
+  gsap.set(textEl, { clearProps: 'backgroundPosition' });
+  textEl.classList.remove('loading-text-shimmer');
+  iconEl.innerHTML = '';
+  label.classList.add('hidden');
+  label.style.display = '';
+}
+
 async function parseVideo() {
   const input = document.getElementById('urlInput');
   let text = input.value.trim();
@@ -1022,6 +1137,10 @@ async function parseVideo() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Parse failed');
     buildResult(data);
+    // Show type label with icon animation before result
+    const labelCount = data.type === 'photo' ? (data.images || []).length :
+                       data.type === 'live_photo' ? (data.video_urls || []).length : 1;
+    await showLoadingLabel(data.type, labelCount);
     animateToResult();
   } catch (e) {
     // Kill all active animations

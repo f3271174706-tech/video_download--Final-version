@@ -5,8 +5,10 @@ import re
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
 from pydantic import BaseModel
 
 from downloader import MOBILE_UA, apply_quality, cleanup_old_files, download_video_for_stream, extract_video_info, download_video
@@ -25,9 +27,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# gzip 压缩（>500B 的响应自动压缩）
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+class CachedStaticFiles(StaticFiles):
+    """Static files with Cache-Control headers for better performance."""
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200 and isinstance(response, Response):
+            # JS/CSS/图片：缓存 7 天
+            if path.endswith(('.js', '.css', '.jpg', '.png', '.webp', '.gif', '.ico')):
+                response.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+            # HTML：缓存 10 分钟（方便更新）
+            elif path.endswith('.html'):
+                response.headers['Cache-Control'] = 'public, max-age=600'
+        return response
+
+
+app.mount("/static", CachedStaticFiles(directory=str(static_dir)), name="static")
 
 
 class ParseRequest(BaseModel):
@@ -46,7 +67,7 @@ async def index():
     from fastapi.responses import HTMLResponse
     html_path = static_dir / "index.html"
     if html_path.exists():
-        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+        return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "public, max-age=600"})
     return HTMLResponse("<h1>index.html not found</h1>", status_code=404)
 
 
@@ -55,7 +76,7 @@ async def index_v1():
     from fastapi.responses import HTMLResponse
     html_path = static_dir / "index-v1.html"
     if html_path.exists():
-        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+        return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "public, max-age=600"})
     return HTMLResponse("<h1>index-v1.html not found</h1>", status_code=404)
 
 
@@ -64,7 +85,7 @@ async def index_v2():
     from fastapi.responses import HTMLResponse
     html_path = static_dir / "index-v2.html"
     if html_path.exists():
-        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+        return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "public, max-age=600"})
     return HTMLResponse("<h1>index-v2.html not found</h1>", status_code=404)
 
 

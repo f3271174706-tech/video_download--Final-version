@@ -140,24 +140,76 @@ def _extract_images_with_playwright(share_url: str) -> tuple[list[str], list[str
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(share_url, wait_until='domcontentloaded', timeout=15000)
-        page.wait_for_timeout(5000)
 
-        # Batch extract via JS - extract videos + images in one call
+        # Wait for images to stabilize (lazy-loaded), poll every 400ms, max 5.2s
+        prev_count = 0
+        stable_rounds = 0
+        for _ in range(13):
+            try:
+                count = page.evaluate('''() => {
+                    let n = 0;
+                    document.querySelectorAll('img').forEach(el => {
+                        const src = el.src || '';
+                        if (src.includes('douyinpic') && src.includes('tos-cn-i-') &&
+                            !src.includes('100x100') && !src.includes('avatar')) n++;
+                    });
+                    return n;
+                }''')
+            except Exception:
+                page.wait_for_timeout(400)
+                continue
+            if count != prev_count:
+                stable_rounds = 0
+                prev_count = count
+                page.wait_for_timeout(400)
+                continue
+            stable_rounds += 1
+            if count > 0 and stable_rounds >= 4:
+                break
+            if count == 0 and stable_rounds >= 6:
+                break
+            page.wait_for_timeout(400)
+
+        # Wait for video elements to appear (they load after images)
+        for _ in range(8):
+            has_video = page.evaluate('''() => {
+                let found = false;
+                document.querySelectorAll('video source').forEach(el => {
+                    const src = el.src || el.getAttribute('src') || '';
+                    if (src.includes('douyinvod')) found = true;
+                });
+                return found;
+            }''')
+            if has_video:
+                break
+            page.wait_for_timeout(400)
+
+        # Batch extract via JS - container scoped + filters + dedup by ID
         all_data = page.evaluate('''() => {
             const videos = [];
-            document.querySelectorAll('video source, video').forEach(el => {
+            const seenPaths = new Set();
+            document.querySelectorAll('video source').forEach(el => {
                 const src = el.src || el.getAttribute('src') || '';
-                if (src && src.includes('douyinvod') && !videos.includes(src)) videos.push(src);
+                if (!src || !src.includes('douyinvod')) return;
+                const pm = src.match(/douyinvod\\.com\\/[^\\/]+\\/[^\\/]+(\\/video\\/[^?]+)/);
+                const path = pm ? pm[1] : src;
+                if (seenPaths.has(path)) return;
+                seenPaths.add(path);
+                videos.push(src);
             });
             const images = [];
             const seen = new Set();
-            document.querySelectorAll('img').forEach(el => {
+            const container = document.querySelector('.note-detail-container');
+            const scope = container || document;
+            scope.querySelectorAll('img').forEach(el => {
                 const src = el.src || '';
                 if (!src || !src.includes('douyinpic')) return;
                 if (src.includes('100x100') || src.includes('avatar')) return;
                 if (src.includes('image-cut-tos-priv')) return;
                 if (src.includes('image-cut-tos')) return;
                 if (src.includes('ies.fe.effect')) return;
+                if (src.includes('sticker')) return;
+                if (src.includes('p14lwwcsbr')) return;
                 if (!src.includes('tos-cn-i-')) return;
                 const w = el.naturalWidth || el.width || 0;
                 const h = el.naturalHeight || el.height || 0;
@@ -198,23 +250,76 @@ def _extract_with_playwright_async(share_url: str) -> tuple[list[str], list[str]
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             page.goto(share_url, wait_until='domcontentloaded', timeout=15000)
-            page.wait_for_timeout(5000)
 
+            # Wait for images to stabilize (lazy-loaded), poll every 400ms, max 5.2s
+            prev_count = 0
+            stable_rounds = 0
+            for _ in range(13):
+                try:
+                    count = page.evaluate('''() => {
+                        let n = 0;
+                        document.querySelectorAll('img').forEach(el => {
+                            const src = el.src || '';
+                            if (src.includes('douyinpic') && src.includes('tos-cn-i-') &&
+                                !src.includes('100x100') && !src.includes('avatar')) n++;
+                        });
+                        return n;
+                    }''')
+                except Exception:
+                    page.wait_for_timeout(400)
+                    continue
+                if count != prev_count:
+                    stable_rounds = 0
+                    prev_count = count
+                    page.wait_for_timeout(400)
+                    continue
+                stable_rounds += 1
+                if count > 0 and stable_rounds >= 4:
+                    break
+                if count == 0 and stable_rounds >= 6:
+                    break
+                page.wait_for_timeout(400)
+
+            # Wait for video elements to appear (they load after images)
+            for _ in range(8):
+                has_video = page.evaluate('''() => {
+                    let found = false;
+                    document.querySelectorAll('video source').forEach(el => {
+                        const src = el.src || el.getAttribute('src') || '';
+                        if (src.includes('douyinvod')) found = true;
+                    });
+                    return found;
+                }''')
+                if has_video:
+                    break
+                page.wait_for_timeout(400)
+
+            # Batch extract via JS - container scoped + filters + dedup by ID
             all_data = page.evaluate('''() => {
                 const videos = [];
-                document.querySelectorAll('video source, video').forEach(el => {
+                const seenPaths = new Set();
+                document.querySelectorAll('video source').forEach(el => {
                     const src = el.src || el.getAttribute('src') || '';
-                    if (src && src.includes('douyinvod') && !videos.includes(src)) videos.push(src);
+                    if (!src || !src.includes('douyinvod')) return;
+                    const pm = src.match(/douyinvod\\.com\\/[^\\/]+\\/[^\\/]+(\\/video\\/[^?]+)/);
+                    const path = pm ? pm[1] : src;
+                    if (seenPaths.has(path)) return;
+                    seenPaths.add(path);
+                    videos.push(src);
                 });
                 const images = [];
                 const seen = new Set();
-                document.querySelectorAll('img').forEach(el => {
+                const container = document.querySelector('.note-detail-container');
+                const scope = container || document;
+                scope.querySelectorAll('img').forEach(el => {
                     const src = el.src || '';
                     if (!src || !src.includes('douyinpic')) return;
                     if (src.includes('100x100') || src.includes('avatar')) return;
                     if (src.includes('image-cut-tos-priv')) return;
                     if (src.includes('image-cut-tos')) return;
                     if (src.includes('ies.fe.effect')) return;
+                    if (src.includes('sticker')) return;
+                    if (src.includes('p14lwwcsbr')) return;
                     if (!src.includes('tos-cn-i-')) return;
                     const w = el.naturalWidth || el.width || 0;
                     const h = el.naturalHeight || el.height || 0;
@@ -321,8 +426,9 @@ def _extract_douyin(url: str) -> dict:
         # Skip for pure photo posts to avoid 8s+ delay
         # Live photos have img_bitrate=null, pure photos have img_bitrate=[...]
         has_video_hint = '"img_bitrate":null' in html
-        # Trigger if: no video found AND (video hint OR few images OR small page)
-        if not video_url and (has_video_hint or len(images) <= 1 or len(html) < 10000):
+        # Trigger if: no video found AND (video hint OR no images extracted OR small page)
+        # Do NOT use len(images) <= 1 — single-image posts are valid and don't need Playwright
+        if not video_url and (has_video_hint or len(images) == 0 or len(html) < 10000):
             try:
                 pw_videos, pw_images = _extract_with_playwright_async(share_url)
                 if pw_images:

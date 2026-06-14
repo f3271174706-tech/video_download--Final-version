@@ -202,11 +202,13 @@ Playwright 加载页面 → 等待图片稳定 → 提取视频和图片
 
 1. 加载分享页，等待 `domcontentloaded`
 2. 轮询检测图片加载（每 400ms 检查一次，最多 5 秒）
-3. 使用 `page.evaluate` 一次性提取所有 `<video>` 和 `<img>` 元素
-4. 过滤规则：
-   - 图片：只保留 `tos-cn-i-` 前缀（内容图），排除头像、表情、贴纸
-   - 视频：只保留 `douyinvod` 域名的视频 URL
-   - 去重：按图片 ID 去重，避免 CDN 重复
+3. 轮询等待视频元素出现（每 400ms 检查一次，最多 3.2 秒）
+4. 使用 `page.evaluate` 一次性提取所有 `<video>` 和 `<img>` 元素
+5. 过滤规则：
+   - 图片：只保留 `tos-cn-i-` 前缀（内容图），排除头像、表情、贴纸、推荐内容
+   - 视频：只保留 `douyinvod` 域名的视频 URL（限定在 `<video source>` 元素内）
+   - 去重：图片按 ID 去重，视频按路径去重（不同 CDN 节点视为同一视频）
+   - 容器范围：图片提取限定在 `.note-detail-container` 内，避免抓取推荐区域
 5. 如果有视频 URL → 标记为 `live_photo` 类型
 
 ### 返回数据
@@ -252,6 +254,39 @@ Playwright 加载页面 → 等待图片稳定 → 提取视频和图片
 | 设计 | Apple Liquid Glass |
 | 视频合成 | ffmpeg |
 | 部署 | CentOS + Cloudflare Tunnel |
+
+## 性能优化
+
+### gzip 压缩
+
+FastAPI 启用 `GZipMiddleware`，大于 500 字节的响应自动 gzip 压缩。效果：
+
+| 资源 | 原始大小 | gzip 后 | 压缩率 |
+|------|---------|---------|--------|
+| html2canvas.min.js | 199KB | ~50KB | 75% |
+| tailwindcss.js | 407KB | ~100KB | 75% |
+| index.html | 62KB | ~12KB | 80% |
+
+### 静态资源缓存
+
+所有静态资源设置 `Cache-Control` 头：
+
+- JS/CSS/图片：`max-age=604800`（7 天），`immutable`
+- HTML 页面：`max-age=600`（10 分钟）
+
+首次加载后，后续访问所有静态资源从浏览器缓存读取，**页面秒开**。
+
+### Tailwind CSS 本地化
+
+`tailwindcss.js` 下载到本地 `static/` 目录，不再依赖 `cdn.tailwindcss.com`（国内访问不稳定）。
+
+### 加载动画
+
+解析结果返回后，显示类型对应的 GSAP 动画图标 + 流光文字：
+
+- 动图（Live Photo）：3 个同心圆（外圈虚线旋转）+ "Live Photo" 流光
+- 视频：▶ 播放三角弹入 + "Video" 流光
+- 图文：叠加矩形滑入 + "Photo" 流光
 
 ## 依赖
 
