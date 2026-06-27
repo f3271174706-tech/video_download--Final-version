@@ -6,3 +6,6 @@ static/index.html.bak
 downloads/
 logs/
 *.log
+test_*.py
+test_*.json
+npm-cache/

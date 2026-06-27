@@ -189,13 +189,18 @@ async def _extract_douyin_api(url: str) -> Optional[dict]:
         images = detail.get('images', [])
 
         # 检查是否是动图（live_photo）
+        # 动图必须满足：aweme_type == 68 或者 images 中有视频数据
         is_live_photo = aweme_type == 68
         if not is_live_photo and images:
-            # 检查 images 中是否有 live_photo_type
+            # 只有当 images 中有 video 字段且包含有效视频 URL 时才认为是动图
             for img in images:
-                if img.get('live_photo_type') == 1:
-                    is_live_photo = True
-                    break
+                video_info = img.get('video', {})
+                if video_info:
+                    play_addr = video_info.get('play_addr', {})
+                    url_list = play_addr.get('url_list', [])
+                    if url_list and any('douyinvod' in url or 'zjcdn' in url for url in url_list):
+                        is_live_photo = True
+                        break
 
         if is_live_photo and images:
             # 动图类型
@@ -225,6 +230,18 @@ async def _extract_douyin_api(url: str) -> Optional[dict]:
                     music_url = play_url['uri']
                 elif isinstance(play_url, str):
                     music_url = play_url
+
+            # 如果没有视频 URL，降级为普通图片类型
+            if not video_urls:
+                return {
+                    "title": desc,
+                    "thumbnail": image_urls[0] if image_urls else cover,
+                    "duration": 0,
+                    "type": "photo",
+                    "images": image_urls,
+                    "music_url": music_url,
+                    "platform": "douyin",
+                }
 
             return {
                 "title": desc,
@@ -348,5 +365,3 @@ async def extract_with_api_async(url: str, platform: str) -> Optional[dict]:
     except Exception as e:
         logger.error(f"API 提取失败: {e}")
         return None
-
-

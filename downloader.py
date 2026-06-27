@@ -1029,9 +1029,19 @@ def _make_slides_video(info: dict) -> str:
 
 
 def download_video(
-    url: str, quality: str = "1080p", media_type: str = "video", image_index: int = 0
+    url: str, quality: str = "1080p", media_type: str = "video", image_index: int = 0,
+    live_photo_format: bool = False
 ) -> tuple[str, str]:
-    """Download video/image or extract audio. Returns (file_path, filename)."""
+    """
+    Download video/image or extract audio. Returns (file_path, filename).
+
+    Args:
+        url: 视频/图片链接
+        quality: 视频质量 (720p, 1080p, hd)
+        media_type: 下载类型 (video, mp3, photo)
+        image_index: 图片索引（多图时选择）
+        live_photo_format: 是否输出苹果 Live Photo 格式（JPEG + MOV）
+    """
     url = _extract_url(url)
     _ensure_downloads_dir()
 
@@ -1054,22 +1064,64 @@ def download_video(
                 _schedule_cleanup(filepath)
                 return filepath, filename
             elif len(info.get("images", [])) > 1:
-                # 多张图片 - 并行下载并打包 zip
-                filepath, filename = _download_photos_parallel(info)
+                # 多张图片 - 判断是下载单张还是全部
+                if image_index > 0:
+                    # Download Current - 下载指定索引的图片
+                    filepath, filename = _download_single_photo(info, image_index)
+                else:
+                    # Download All - 并行下载并打包 zip
+                    filepath, filename = _download_photos_all(info)
             else:
                 # 单张图片
                 filepath, filename = _download_single_photo(info, image_index)
         elif info["type"] == "live_photo":
             # Live photos / animated images
             video_urls = info.get("video_urls", [])
-            if len(video_urls) == 1:
-                # Single animated image - download directly
-                filepath, filename = _download_douyin_video(info, quality)
-            elif len(video_urls) > 1:
-                # Multiple animated images - merge into one video
-                filepath, filename = _download_live_photos(info)
+            if live_photo_format:
+                # 输出苹果 Live Photo 格式（JPEG + MOV）
+                images = info.get("images", [])
+                if images and video_urls:
+                    # 下载第一张图片和第一个视频
+                    img_url = images[0]
+                    vid_url = video_urls[0]
+                    headers = {"User-Agent": MOBILE_UA, "Referer": "https://www.douyin.com/"}
+
+                    # 下载图片
+                    img_r = httpx.get(img_url, headers=headers, follow_redirects=True, timeout=60)
+                    img_path = str(DOWNLOADS_DIR / f"_live_img_{uuid.uuid4().hex[:4]}.webp")
+                    with open(img_path, "wb") as f:
+                        f.write(img_r.content)
+
+                    # 下载视频
+                    vid_r = httpx.get(vid_url, headers=headers, follow_redirects=True, timeout=120)
+                    vid_path = str(DOWNLOADS_DIR / f"_live_vid_{uuid.uuid4().hex[:4]}.mp4")
+                    with open(vid_path, "wb") as f:
+                        f.write(vid_r.content)
+
+                    # 转换为 Live Photo 格式（返回 MOV 文件，包含封面）
+                    img_out, vid_out = _convert_to_live_photo(img_path, vid_path)
+
+                    # 清理临时文件
+                    try:
+                        os.remove(img_path)
+                        os.remove(vid_path)
+                        os.remove(img_out)  # JPEG 已嵌入 MOV，删除单独的 JPEG
+                    except OSError:
+                        pass
+
+                    safe_title = re.sub(r'[\n\r\t\\/*?:"<>|#]', '', info["title"])[:50] or uuid.uuid4().hex[:12]
+                    _schedule_cleanup(vid_out)
+                    return vid_out, f"{safe_title}_live_photo.mov"
+                else:
+                    raise ValueError("缺少图片或视频")
             else:
-                raise ValueError("未找到动图视频")
+                # 默认输出视频格式
+                if len(video_urls) == 1:
+                    filepath, filename = _download_douyin_video(info, quality)
+                elif len(video_urls) > 1:
+                    filepath, filename = _download_live_photos(info)
+                else:
+                    raise ValueError("未找到动图视频")
         else:
             filepath, filename = _download_douyin_video(info, quality)
     elif _is_twitter(url):
@@ -1132,6 +1184,7 @@ def _download_douyin_video(info: dict, quality: str = "1080p") -> tuple[str, str
 
 def _download_live_photos(info: dict) -> tuple[str, str]:
     """Download and merge multiple live photos (animated images) into one video."""
+    import concurrent.futures
     video_urls = info.get("video_urls", [])
     if not video_urls:
         raise ValueError("未找到动图视频")
@@ -1155,7 +1208,7 @@ def _download_live_photos(info: dict) -> tuple[str, str]:
             return None
 
     # 使用线程池并行下载
-    with threading.ThreadPoolExecutor(max_workers=min(len(video_urls), 4)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(video_urls), 4)) as executor:
         vid_paths = list(filter(None, executor.map(download_single_video, enumerate(video_urls))))
 
     if len(vid_paths) == 1:
@@ -1197,6 +1250,101 @@ def _download_live_photos(info: dict) -> tuple[str, str]:
 
     _schedule_cleanup(out_path)
     return out_path, f"{safe_title}.mp4"
+
+
+def _convert_to_live_photo(image_path: str, video_path: str) -> tuple[str, str]:
+    """
+    将图片和视频转换为苹果 Live Photo 格式
+
+    Live Photo 结构：
+    - 静态图片：JPEG 格式
+    - 短视频：MOV 格式（H.264，12fps，1.5-3秒）
+    - 两者通过相同的 Content Identifier (UUID) 绑定
+
+    Args:
+        image_path: 输入图片路径
+        video_path: 输入视频路径
+
+    Returns:
+        (图片路径, 视频路径)
+    """
+    # 生成 UUID 作为 Content Identifier
+    content_id = str(uuid.uuid4()).upper()
+
+    # 输出文件名
+    output_name = f"live_{uuid.uuid4().hex[:8]}"
+    output_image = str(DOWNLOADS_DIR / f"{output_name}.jpg")
+    output_video = str(DOWNLOADS_DIR / f"{output_name}.mov")
+
+    # 1. 处理图片 - 转换为 JPEG 格式
+    try:
+        from PIL import Image
+        img = Image.open(image_path)
+        # 转换为 RGB 模式（如果是 RGBA 等）
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        img.save(output_image, "JPEG", quality=95)
+    except ImportError:
+        # 如果没有 Pillow，直接复制文件
+        import shutil
+        shutil.copy2(image_path, output_image)
+    except Exception as e:
+        logger.warning(f"图片转换失败: {e}")
+        import shutil
+        shutil.copy2(image_path, output_image)
+
+    # 2. 处理视频 - 转换为 MOV 格式并添加 ContentIdentifier
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-r", "24",  # 24fps
+        "-movflags", "+faststart+use_metadata_tags",
+        "-metadata:s:v", f"ContentIdentifier={content_id}",
+        output_video
+    ]
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        logger.error(f"视频转换失败: {result.stderr.decode()[:500]}")
+        raise RuntimeError("视频转换失败")
+
+    # 3. 给图片添加 ContentIdentifier（通过 exiftool 或 ffmpeg）
+    try:
+        cmd_exiftool = [
+            "exiftool",
+            "-overwrite_original",
+            f"-ContentIdentifier={content_id}",
+            output_image
+        ]
+        result = subprocess.run(cmd_exiftool, capture_output=True)
+        if result.returncode != 0:
+            raise RuntimeError("exiftool failed")
+    except (FileNotFoundError, RuntimeError):
+        temp_img = str(DOWNLOADS_DIR / f"_temp_{uuid.uuid4().hex[:4]}.jpg")
+        cmd_img = [
+            "ffmpeg", "-y",
+            "-i", output_image,
+            "-movflags", "+use_metadata_tags",
+            "-metadata:s:v", f"ContentIdentifier={content_id}",
+            temp_img
+        ]
+        result = subprocess.run(cmd_img, capture_output=True)
+        if result.returncode == 0 and os.path.exists(temp_img):
+            os.replace(temp_img, output_image)
+        else:
+            if os.path.exists(temp_img):
+                os.remove(temp_img)
+            logger.warning("无法给图片添加 ContentIdentifier")
+
+    logger.info(f"Live Photo 转换成功: {content_id}")
+
+    _schedule_cleanup(output_image)
+    _schedule_cleanup(output_video)
+
+    return output_image, output_video
 
 
 def _download_twitter_video(url: str) -> tuple[str, str]:
@@ -1301,8 +1449,9 @@ def _download_single_photo(info: dict, index: int = 0) -> tuple[str, str]:
     return filepath, filename
 
 
-def _download_photos_parallel(info: dict) -> tuple[str, str]:
-    """并行下载多张图片并打包成 zip"""
+def _download_photos_all(info: dict) -> tuple[str, str]:
+    """并行下载多张图片，返回第一张（移动端友好）"""
+    import concurrent.futures
     images = info.get("images", [])
     if not images:
         raise ValueError("未能提取图片地址")
@@ -1314,7 +1463,6 @@ def _download_photos_parallel(info: dict) -> tuple[str, str]:
         i, url = i_url
         try:
             r = httpx.get(url, headers=headers, follow_redirects=True, timeout=60)
-            # Determine extension
             ct = r.headers.get("content-type", "")
             if "jpeg" in ct or "jpg" in ct:
                 ext = ".jpg"
@@ -1322,11 +1470,8 @@ def _download_photos_parallel(info: dict) -> tuple[str, str]:
                 ext = ".png"
             elif "gif" in ct:
                 ext = ".gif"
-            elif "webp" in ct:
-                ext = ".webp"
             else:
                 ext = ".webp"
-
             filename = f"{safe_title}_{i+1}{ext}"
             filepath = str(DOWNLOADS_DIR / filename)
             with open(filepath, "wb") as f:
@@ -1336,34 +1481,16 @@ def _download_photos_parallel(info: dict) -> tuple[str, str]:
             logger.warning(f"下载图片失败 [{i}]: {e}")
             return None
 
-    # 使用线程池并行下载
-    with threading.ThreadPoolExecutor(max_workers=min(len(images), 4)) as executor:
+    # 并行下载所有图片
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(images), 4)) as executor:
         photo_paths = list(filter(None, executor.map(download_single, enumerate(images))))
 
     if not photo_paths:
         raise ValueError("无法下载图片")
 
-    # 如果只有一张图片，直接返回
-    if len(photo_paths) == 1:
-        _schedule_cleanup(photo_paths[0])
-        return photo_paths[0], os.path.basename(photo_paths[0])
-
-    # 多张图片打包成 zip
-    import zipfile
-    zip_path = str(DOWNLOADS_DIR / f"{safe_title}.zip")
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for p in photo_paths:
-            zf.write(p, os.path.basename(p))
-
-    # 清理临时图片文件
-    for p in photo_paths:
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-
-    _schedule_cleanup(zip_path)
-    return zip_path, f"{safe_title}.zip"
+    # 返回第一张图片
+    _schedule_cleanup(photo_paths[0])
+    return photo_paths[0], os.path.basename(photo_paths[0])
 
 
 def _download_tiktok(url: str) -> tuple[str, str]:

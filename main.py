@@ -60,6 +60,7 @@ class DownloadRequest(BaseModel):
     quality: str = "1080p"
     type: str = "video"
     image_index: int = 0
+    live_photo_format: bool = False
 
 
 @app.get("/")
@@ -222,7 +223,8 @@ async def download_video_api(req: DownloadRequest):
 
     try:
         file_path, filename = download_video(
-            url, quality=req.quality, media_type=req.type, image_index=req.image_index
+            url, quality=req.quality, media_type=req.type, image_index=req.image_index,
+            live_photo_format=req.live_photo_format
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"下载失败: {str(e)}")

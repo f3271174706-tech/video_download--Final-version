@@ -98,6 +98,38 @@
   margin: 2px 0;
   text-align: center;
 }
+
+/* ─── Button icon animations ─── */
+/* Live Photo: rotating dashed outer ring */
+@keyframes rotateRing {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.live-photo-icon .rotate-ring {
+  transform-origin: center;
+  animation: rotateRing 3s linear infinite;
+}
+
+/* Flowing shimmer text effect */
+@keyframes shimmerFlow {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.btn-label-live, .btn-label-photo, .btn-label-download {
+  background: linear-gradient(
+    90deg,
+    currentColor 0%,
+    rgba(180,200,255,0.9) 25%,
+    rgba(220,180,255,0.9) 50%,
+    rgba(255,200,220,0.9) 75%,
+    currentColor 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmerFlow 2.5s linear infinite;
+}
 </style>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600&display=swap');
@@ -279,11 +311,6 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-  }
-  #saveImageBtn {
-    padding: 14px;
-    font-size: 14px;
-    min-height: 48px;
   }
   #progressWrap {
     margin-top: 8px;
@@ -711,11 +738,50 @@ video::-webkit-media-controls-enclosure {
         <!-- Photo dots -->
         <div id="photoDots" class="hidden flex items-center justify-center gap-2"></div>
 
-        <!-- Save current image button -->
-        <button id="saveImageBtn" onclick="saveCurrentImage()" class="hidden btn-glass w-full rounded-[16px] py-2.5 text-xs flex items-center justify-center gap-1.5">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Save Image
-        </button>
+        <!-- Photo buttons -->
+        <div id="photoButtons" class="hidden flex flex-col gap-3">
+          <button onclick="downloadCurrentPhoto()" class="btn-accent w-full rounded-[16px] sm:rounded-[20px] py-3 sm:py-3.5 text-sm flex items-center justify-center gap-2">
+            <!-- Photo icon: overlapping rectangles -->
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="5" width="14" height="14" rx="2"/>
+              <rect x="7" y="2" width="14" height="14" rx="2" fill="white" opacity="0.8"/>
+            </svg>
+            <span class="btn-label-photo">Download Current</span>
+          </button>
+          <button onclick="downloadAllPhotos()" class="btn-glass w-full rounded-[16px] sm:rounded-[20px] py-3 sm:py-3.5 text-sm flex items-center justify-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="5" width="14" height="14" rx="2"/>
+              <rect x="7" y="2" width="14" height="14" rx="2" fill="white" opacity="0.8"/>
+            </svg>
+            <span class="btn-label-photo">Download All</span>
+          </button>
+          <button onclick="downloadSlideshow()" class="btn-glass w-full rounded-[16px] sm:rounded-[20px] py-3 sm:py-3.5 text-sm flex items-center justify-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <polygon points="6,3 20,12 6,21"/>
+            </svg>
+            <span class="btn-label-download">Slideshow</span>
+          </button>
+        </div>
+
+        <!-- Live Photo buttons -->
+        <div id="livePhotoButtons" class="hidden flex flex-col gap-3">
+          <button onclick="downloadLivePhoto()" class="btn-accent w-full rounded-[16px] sm:rounded-[20px] py-3 sm:py-3.5 text-sm flex items-center justify-center gap-2">
+            <!-- Live Photo icon: 3 concentric circles, outer dashed rotating -->
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="live-photo-icon">
+              <circle cx="12" cy="12" r="10" stroke-dasharray="4 3" class="rotate-ring"/>
+              <circle cx="12" cy="12" r="6" opacity="0.6"/>
+              <circle cx="12" cy="12" r="2.5" fill="currentColor" opacity="0.8"/>
+            </svg>
+            <span class="btn-label-live">Live Photo</span>
+          </button>
+          <button onclick="downloadLivePhotoAsVideo()" class="btn-glass w-full rounded-[16px] sm:rounded-[20px] py-3 sm:py-3.5 text-sm flex items-center justify-center gap-2">
+            <!-- Video icon: play triangle -->
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <polygon points="6,3 20,12 6,21"/>
+            </svg>
+            <span class="btn-label-video">Save as Video</span>
+          </button>
+        </div>
 
         <!-- Quality -->
         <div id="qualityRow" class="flex gap-1.5 sm:gap-1.5">
@@ -733,7 +799,8 @@ video::-webkit-media-controls-enclosure {
         <!-- Download -->
         <button id="downloadBtn" onclick="downloadVideo()"
           class="btn-accent w-full rounded-[16px] sm:rounded-[20px] py-4 sm:py-3.5 text-sm sm:text-sm flex items-center justify-center gap-2">
-          <span id="downloadText">Download</span>
+          <svg id="downloadIcon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6,3 20,12 6,21"/></svg>
+          <span id="downloadText" class="btn-label-download">Download</span>
           <div id="downloadSpinner" class="hidden spinner"></div>
         </button>
         <!-- Progress Bar -->
@@ -1024,13 +1091,19 @@ function setType(t) {
 }
 
 function updateLabel() {
-  document.getElementById('downloadText').textContent =
-    currentContentType === 'photo'
-      ? currentType === 'mp3' ? 'Download MP3'
-      : currentType === 'video' ? 'Download Slideshow'
-      : 'Download'
-    : currentType === 'mp3' ? 'Download MP3'
-    : 'Download';
+  // Update main download button text and icon
+  const downloadText = document.getElementById('downloadText');
+  const downloadIcon = document.getElementById('downloadIcon');
+  if (currentContentType === 'video') {
+    downloadText.textContent = currentType === 'mp3' ? 'Download MP3' : 'Download';
+    downloadIcon.style.display = currentType === 'mp3' ? 'none' : '';
+  } else if (currentContentType === 'photo') {
+    downloadText.textContent = 'Download';
+    downloadIcon.style.display = 'none';
+  } else if (currentContentType === 'live_photo') {
+    downloadText.textContent = 'Download';
+    downloadIcon.style.display = 'none';
+  }
 }
 
 function setQuality(q) {
@@ -1286,14 +1359,25 @@ async function parseVideo() {
 function buildResult(data) {
   const qRow = document.getElementById('qualityRow'), tRow = document.getElementById('typeRow');
   const vWrap = document.getElementById('videoWrap'), pWrap = document.getElementById('photoWrap'), pDots = document.getElementById('photoDots');
+  const photoButtons = document.getElementById('photoButtons');
+  const livePhotoButtons = document.getElementById('livePhotoButtons');
+
+  // Hide all download buttons first
+  photoButtons.classList.add('hidden');
+  livePhotoButtons.classList.add('hidden');
+  document.getElementById('downloadBtn').classList.remove('hidden');
 
   if (data.type === 'photo') {
     currentContentType = 'photo'; currentImages = data.images || [];
     vWrap.classList.add('hidden'); pWrap.classList.remove('hidden'); pDots.classList.remove('hidden');
     document.getElementById('landscapeBtn').classList.add('hidden');
-    document.getElementById('saveImageBtn').classList.remove('hidden');
     qRow.classList.add('hidden'); tRow.classList.add('hidden'); currentVideoUrl = '';
-    if (data.music_url) { tRow.classList.remove('hidden'); setType('video'); }
+
+    // Show photo download buttons, hide main download button and other buttons
+    photoButtons.classList.remove('hidden');
+    livePhotoButtons.classList.add('hidden');
+    document.getElementById('downloadBtn').classList.add('hidden');
+
     // Show slider for 3+ images, dots for fewer
     if (currentImages.length > 2) {
       buildPhotoSlider(currentImages.length);
@@ -1315,7 +1399,6 @@ function buildResult(data) {
 
     // Show video by default
     vWrap.classList.remove('hidden');
-    qRow.classList.remove('hidden'); tRow.classList.remove('hidden');
     document.getElementById('landscapeBtn').classList.remove('hidden');
     const p = document.getElementById('videoPlayer');
     p.poster = data.thumbnail;
@@ -1324,14 +1407,17 @@ function buildResult(data) {
     p.load();
     p.play().catch(() => {});
 
+    // Hide quality and type rows, show live photo buttons
+    qRow.classList.add('hidden'); tRow.classList.add('hidden');
+    livePhotoButtons.classList.remove('hidden');
+    document.getElementById('downloadBtn').classList.add('hidden');
+
     // Show photo section if images exist
     if (currentImages.length > 0) {
       pWrap.classList.remove('hidden');
       document.getElementById('photoDisplay').src = currentImages[0];
-      document.getElementById('saveImageBtn').classList.remove('hidden');
     } else {
       pWrap.classList.add('hidden');
-      document.getElementById('saveImageBtn').classList.add('hidden');
     }
 
     // Show dots for videos + images
@@ -1345,7 +1431,7 @@ function buildResult(data) {
         buildPhotoSliderIn(currentImages.length, document.getElementById('imageSliderWrap'));
       } else {
         ds += `<span class="mx-1">|</span>`;
-        currentImages.forEach((_, i) => { ds += `<button onclick="showPhoto(${i})" class="w-2 h-2 rounded-full bg-black/10"></button>`; });
+        currentImages.forEach((_, i) => { ds += `<button onclick="showPhoto(${i})" class="w-2 h-2 rounded-full bg-black/10"}"></button>`; });
         pDots.innerHTML = ds;
       }
     } else {
@@ -1361,7 +1447,6 @@ function buildResult(data) {
     vWrap.classList.remove('hidden'); pWrap.classList.add('hidden'); pDots.classList.add('hidden');
     qRow.classList.remove('hidden'); tRow.classList.remove('hidden');
     document.getElementById('landscapeBtn').classList.remove('hidden');
-    document.getElementById('saveImageBtn').classList.add('hidden');
     const p = document.getElementById('videoPlayer');
     p.poster = data.thumbnail;
     p.muted = false;
@@ -1379,11 +1464,12 @@ function buildResult(data) {
 }
 
 // ═══ Download ═══
-async function saveCurrentImage() {
+async function downloadCurrentPhoto() {
   if (!currentUrl) return;
-  const btn = document.getElementById('saveImageBtn');
-  const orig = btn.textContent;
-  btn.disabled = true; btn.textContent = 'Saving...';
+  const btn = document.getElementById('photoButtons').querySelector('button:first-child');
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = 'Downloading...';
   try {
     const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, type: 'image', image_index: currentPhotoIdx }) });
     if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
@@ -1395,25 +1481,95 @@ async function saveCurrentImage() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
   } catch (e) { showToast(e.message || 'Failed', 'error'); }
-  finally { btn.disabled = false; btn.textContent = orig; }
+  finally { btn.disabled = false; btn.textContent = origText; }
 }
-async function downloadCurrentPhoto() {
+
+async function downloadSlideshow() {
   if (!currentUrl) return;
-  const btn = document.getElementById('downloadBtn'); btn.disabled = true;
-  document.getElementById('downloadText').textContent = 'Downloading...';
-  document.getElementById('downloadSpinner').classList.remove('hidden');
+  const btn = document.getElementById('photoButtons').querySelector('button:last-child');
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = 'Creating...';
   try {
-    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, type: currentType, image_index: currentPhotoIdx }) });
+    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, type: 'video' }) });
     if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
     const blob = await res.blob();
-    let fn = 'image.webp';
+    let fn = 'slideshow.mp4';
     const disp = res.headers.get('Content-Disposition') || '';
     const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
     if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
   } catch (e) { showToast(e.message || 'Failed', 'error'); }
-  finally { btn.disabled = false; document.getElementById('downloadSpinner').classList.add('hidden'); document.getElementById('downloadText').textContent = 'Download Image'; }
+  finally { btn.disabled = false; btn.textContent = origText; }
+}
+
+async function downloadAllPhotos() {
+  if (!currentUrl || !currentImages.length) return;
+  const btn = document.getElementById('photoButtons').querySelector('button:nth-child(2)');
+  btn.disabled = true;
+  const origText = btn.textContent;
+  try {
+    for (let i = 0; i < currentImages.length; i++) {
+      btn.textContent = `Downloading ${i + 1}/${currentImages.length}...`;
+      const res = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: currentUrl, type: 'image', image_index: i })
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+      const blob = await res.blob();
+      let fn = `image_${i + 1}.webp`;
+      const disp = res.headers.get('Content-Disposition') || '';
+      const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+      if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+      // 等待一小段时间再下载下一张
+      if (i < currentImages.length - 1) await new Promise(r => setTimeout(r, 500));
+    }
+    showToast(`Downloaded ${currentImages.length} images`, 'success');
+  } catch (e) { showToast(e.message || 'Failed', 'error'); }
+  finally { btn.disabled = false; btn.textContent = origText; }
+}
+
+async function downloadLivePhoto() {
+  if (!currentUrl) return;
+  const btn = document.getElementById('livePhotoButtons').querySelector('button:first-child');
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = 'Converting...';
+  try {
+    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, live_photo_format: true }) });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+    const blob = await res.blob();
+    let fn = 'live_photo.mov';
+    const disp = res.headers.get('Content-Disposition') || '';
+    const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+    if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+  } catch (e) { showToast(e.message || 'Failed', 'error'); }
+  finally { btn.disabled = false; btn.textContent = origText; }
+}
+
+async function downloadLivePhotoAsVideo() {
+  if (!currentUrl) return;
+  const btn = document.getElementById('downloadBtn'); btn.disabled = true;
+  document.getElementById('downloadText').textContent = 'Downloading...';
+  document.getElementById('downloadSpinner').classList.remove('hidden');
+  try {
+    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, type: 'video' }) });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+    const blob = await res.blob();
+    let fn = 'video.mp4';
+    const disp = res.headers.get('Content-Disposition') || '';
+    const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+    if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+  } catch (e) { showToast(e.message || 'Failed', 'error'); }
+  finally { btn.disabled = false; document.getElementById('downloadSpinner').classList.add('hidden'); document.getElementById('downloadText').textContent = 'Video'; }
 }
 
 function formatSize(bytes) {
